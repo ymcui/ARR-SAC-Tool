@@ -26,13 +26,21 @@ Before running the dashboard, make sure you have:
 
 If you do not already have Node.js and `npm`, install Node.js from [nodejs.org](https://nodejs.org/). The `npm` command is included with the standard Node.js installer.
 
+## Installation
+
+Just run:
+```bash
+npm install
+```
+
+You only need to run `npm install` once after downloading the repository, or again later if the project dependencies change.
+
 ## Start The Dashboard
 
-1. Run `npm install`
-2. Run `npm run dev`
-3. Open [http://127.0.0.1:8000](http://127.0.0.1:8000)
-4. Sign in with your OpenReview email and password
-5. Enter a venue ID and click **Load venue**
+1. Run `npm run dev`
+2. Open [http://127.0.0.1:8000](http://127.0.0.1:8000)
+3. Sign in with your OpenReview email and password
+4. Enter a venue ID and click **Load venue**
 
 ARR example:
 
@@ -42,7 +50,7 @@ Commitment-stage example:
 
 `aclweb.org/ACL/2026/Conference`
 
-The first `npm run dev` creates a local Python environment in `.venv` and installs the backend requirements automatically.
+The first `npm run dev` creates a local Python environment in `.venv` and installs the backend requirements automatically. Later launches should be faster.
 
 ## What You Can Monitor
 
