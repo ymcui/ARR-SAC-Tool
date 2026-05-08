@@ -1,0 +1,345 @@
+{
+  "viewer": {
+    "id": "~Test_SAC1",
+    "fullname": "Test SAC"
+  },
+  "submission_name": "Submission",
+  "my_sac_groups": [
+    "aclweb.org/ACL/ARR/2026/March/Submission42/Senior_Area_Chairs",
+    "aclweb.org/ACL/ARR/2026/March/Submission43/Senior_Area_Chairs",
+    "aclweb.org/ACL/ARR/2026/March/Submission44/Senior_Area_Chairs",
+    "aclweb.org/ACL/ARR/2026/March/Submission45/Senior_Area_Chairs"
+  ],
+  "submissions": [
+    {
+      "number": 42,
+      "id": "paper42",
+      "readers": [
+        "aclweb.org/ACL/ARR/2026/March/Submission42/Senior_Area_Chairs"
+      ],
+      "content": {
+        "title": {
+          "value": "A Careful Study of Reviewer Discussion Dynamics"
+        },
+        "paper_type": {
+          "value": "Long"
+        },
+        "venue": {
+          "value": "ACL ARR 2026 March"
+        }
+      },
+      "replies": [
+        {
+          "id": "review-1",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Official_Review"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Reviewer_1"
+          ],
+          "content": {
+            "confidence": {
+              "value": "4"
+            },
+            "soundness": {
+              "value": "3.5"
+            },
+            "excitement": {
+              "value": "3"
+            },
+            "overall_assessment": {
+              "value": "4"
+            }
+          }
+        },
+        {
+          "id": "review-2",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Official_Review"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Reviewer_2"
+          ],
+          "content": {
+            "confidence": {
+              "value": "3"
+            },
+            "soundness": {
+              "value": "4"
+            },
+            "excitement": {
+              "value": "4"
+            },
+            "overall_assessment": {
+              "value": "3.5"
+            }
+          }
+        },
+        {
+          "id": "review-3",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Official_Review"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Reviewer_3"
+          ],
+          "content": {
+            "confidence": {
+              "value": "4"
+            },
+            "soundness": {
+              "value": "4"
+            },
+            "excitement": {
+              "value": "3.5"
+            },
+            "overall_assessment": {
+              "value": "4.5"
+            }
+          }
+        },
+        {
+          "id": "meta-1",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Meta_Review"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Area_Chair_1"
+          ],
+          "content": {
+            "overall_rating": {
+              "value": "4"
+            }
+          }
+        },
+        {
+          "id": "author-1",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Comment"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Authors"
+          ],
+          "content": {
+            "comment": {
+              "value": "Author response one."
+            }
+          }
+        },
+        {
+          "id": "author-2",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Comment"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Authors"
+          ],
+          "content": {
+            "comment": {
+              "value": "Author response two."
+            }
+          }
+        },
+        {
+          "id": "author-3",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Comment"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Authors"
+          ],
+          "content": {
+            "comment": {
+              "value": "Author response three."
+            }
+          }
+        },
+        {
+          "id": "checklist-1",
+          "forum": "paper42",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Action_Editor_Checklist"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Area_Chair_1"
+          ],
+          "content": {
+            "text": {
+              "value": "Checklist complete."
+            }
+          }
+        },
+        {
+          "id": "comment-root",
+          "forum": "paper42",
+          "tcdate": 1712102400000,
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Review_Issue_Report"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Reviewer_2"
+          ],
+          "content": {
+            "comment": {
+              "value": "Potential issue report."
+            }
+          }
+        },
+        {
+          "id": "comment-reply",
+          "forum": "paper42",
+          "replyto": "comment-root",
+          "tcdate": 1712188800000,
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Comment"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Area_Chair_1"
+          ],
+          "content": {
+            "comment": {
+              "value": "Following up on the report."
+            }
+          }
+        }
+      ],
+      "area_chairs": [
+        "~Area_Chair1"
+      ],
+      "reviewers": [
+        "~Reviewer_A1",
+        "~Reviewer_A2",
+        "~Reviewer_A3"
+      ]
+    },
+    {
+      "number": 43,
+      "id": "paper43",
+      "readers": [
+        "aclweb.org/ACL/ARR/2026/March/Submission43/Senior_Area_Chairs"
+      ],
+      "content": {
+        "paper_type": {
+          "value": "Short"
+        },
+        "venue": {
+          "value": "ACL ARR 2026 March"
+        }
+      },
+      "replies": [
+        {
+          "id": "review-43-1",
+          "forum": "paper43",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission43/-/Official_Review"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission43/Reviewer_1"
+          ],
+          "content": {
+            "confidence": {
+              "value": "2"
+            },
+            "overall_assessment": {
+              "value": "2.5"
+            }
+          }
+        },
+        {
+          "id": "meta-43",
+          "forum": "paper43",
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission43/-/Meta_Review"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission43/Area_Chair_1"
+          ],
+          "content": {
+            "score": {
+              "value": "2.5"
+            }
+          }
+        }
+      ],
+      "area_chairs": [
+        "~Area_Chair2"
+      ],
+      "reviewers": [
+        "~Reviewer_B1",
+        "~Reviewer_B2",
+        "~Reviewer_B3"
+      ]
+    },
+    {
+      "number": 44,
+      "id": "paper44",
+      "readers": [
+        "aclweb.org/ACL/ARR/2026/March/Submission44/Senior_Area_Chairs"
+      ],
+      "content": {
+        "paper_type": {
+          "value": "Long"
+        },
+        "venue": {
+          "value": "ACL ARR 2026 March Withdrawn"
+        }
+      },
+      "replies": [],
+      "area_chairs": [
+        "~Area_Chair3"
+      ],
+      "reviewers": []
+    },
+    {
+      "number": 45,
+      "id": "paper45",
+      "readers": [
+        "aclweb.org/ACL/ARR/2026/March/Submission45/Senior_Area_Chairs"
+      ],
+      "content": {
+        "paper_type": {
+          "value": "Long"
+        },
+        "venue": {
+          "value": "ACL ARR 2026 March Desk Rejected"
+        }
+      },
+      "replies": [],
+      "area_chairs": [
+        "~Area_Chair4"
+      ],
+      "reviewers": []
+    }
+  ],
+  "withdrawn_submissions": [
+    {
+      "number": 44,
+      "id": "paper44",
+      "readers": [
+        "aclweb.org/ACL/ARR/2026/March/Submission44/Senior_Area_Chairs"
+      ],
+      "content": {
+        "title": {
+          "value": "Withdrawn Work on Robust Review Signals"
+        },
+        "paper_type": {
+          "value": "Long"
+        },
+        "venue": {
+          "value": "ACL ARR 2026 March Withdrawn"
+        }
+      },
+      "replies": [],
+      "area_chairs": [
+        "~Area_Chair3"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,452 @@
+"use client";
+
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState, useTransition } from "react";
+
+import { ACDashboardPanel } from "@/components/ac-dashboard-panel";
+import { CommentsPanel } from "@/components/comments-panel";
+import { LoginPanel } from "@/components/login-panel";
+import { PapersPanel } from "@/components/papers-panel";
+import { Toolbar } from "@/components/toolbar";
+import { VenueWorkspacePanel } from "@/components/venue-workspace-panel";
+import type { DashboardLoadProgress, DashboardResponse, TabKey, VenueStage, ViewerInfo } from "@/lib/types";
+
+const AnalyticsPanel = dynamic(() => import("@/components/analytics-panel"), {
+  ssr: false,
+  loading: () => (
+    <section className="panel">
+      <div className="empty-state inset">
+        <h3>Loading analytics...</h3>
+        <p>The heavier chart layer is being loaded on demand.</p>
+      </div>
+    </section>
+  )
+});
+
+const VIEWER_STORAGE_KEY = "arr-sac-dashboard.viewer";
+const VENUE_STORAGE_KEY = "arr-sac-dashboard.venue";
+const RECENT_VENUES_STORAGE_KEY = "arr-sac-dashboard.recent-venues";
+const DEFAULT_VENUE_ID = "aclweb.org/ACL/ARR/2026/March";
+const ARR_STAGE_PREFIX = "aclweb.org/ACL/ARR";
+const MAX_RECENT_VENUES = 8;
+
+const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: "papers", label: "Papers" },
+  { key: "ac", label: "AC Dashboard" },
+  { key: "comments", label: "Comments" },
+  { key: "analytics", label: "Analytics" }
+];
+const COMMITMENT_TABS = TABS.filter((tab) => tab.key !== "ac");
+
+async function parseJson<T>(response: Response): Promise<T> {
+  return (await response.json()) as T;
+}
+
+function apiUrl(path: string): string {
+  const host = typeof window === "undefined" ? "127.0.0.1" : window.location.hostname || "127.0.0.1";
+  const protocol = typeof window === "undefined" ? "http:" : window.location.protocol;
+  return `${protocol}//${host}:8001${path}`;
+}
+
+function getVenueStage(venueId: string): VenueStage {
+  return venueId.trim().startsWith(ARR_STAGE_PREFIX) ? "ARR Stage" : "Commitment Stage";
+}
+
+function parseRecentVenueIds(rawValue: string | null): string[] {
+  if (!rawValue) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function readRecentVenueIds(): string[] {
+  try {
+    if (typeof window.localStorage?.getItem !== "function") {
+      return [];
+    }
+    return parseRecentVenueIds(window.localStorage.getItem(RECENT_VENUES_STORAGE_KEY));
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentVenueIds(recentVenueIds: string[]) {
+  try {
+    if (typeof window.localStorage?.setItem === "function") {
+      window.localStorage.setItem(RECENT_VENUES_STORAGE_KEY, JSON.stringify(recentVenueIds));
+    }
+  } catch {
+    // Ignore storage failures; the input still works normally without suggestions.
+  }
+}
+
+function addRecentVenueId(venueId: string, recentVenueIds: string[]): string[] {
+  const trimmedVenueId = venueId.trim();
+  if (!trimmedVenueId) {
+    return recentVenueIds;
+  }
+
+  const nextVenueIds = [
+    trimmedVenueId,
+    ...recentVenueIds.filter((item) => item !== trimmedVenueId && item.trim().length > 0)
+  ].slice(0, MAX_RECENT_VENUES);
+  writeRecentVenueIds(nextVenueIds);
+  return nextVenueIds;
+}
+
+export function DashboardShell() {
+  const [viewer, setViewer] = useState<ViewerInfo | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [venueId, setVenueId] = useState(DEFAULT_VENUE_ID);
+  const [activeTab, setActiveTab] = useState<TabKey>("papers");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<DashboardLoadProgress | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [recentVenueIds, setRecentVenueIds] = useState<string[]>([]);
+  const [, startTransition] = useTransition();
+  const progressPollId = useRef<number | null>(null);
+
+  useEffect(() => {
+    const savedVenue = window.sessionStorage.getItem(VENUE_STORAGE_KEY);
+    const savedViewer = window.sessionStorage.getItem(VIEWER_STORAGE_KEY);
+    const savedRecentVenueIds = readRecentVenueIds();
+    setRecentVenueIds(
+      savedRecentVenueIds.length > 0 ? savedRecentVenueIds : [savedVenue || DEFAULT_VENUE_ID]
+    );
+
+    if (savedVenue) {
+      setVenueId(savedVenue);
+    }
+
+    if (savedViewer) {
+      try {
+        const parsedViewer = JSON.parse(savedViewer) as ViewerInfo;
+        setViewer(parsedViewer);
+      } catch {
+        window.sessionStorage.removeItem(VIEWER_STORAGE_KEY);
+      }
+    }
+  }, []);
+
+  useEffect(() => () => stopProgressPolling(), []);
+
+  function stopProgressPolling() {
+    if (progressPollId.current !== null) {
+      window.clearInterval(progressPollId.current);
+      progressPollId.current = null;
+    }
+  }
+
+  async function fetchProgress(nextVenueId: string) {
+    try {
+      const response = await fetch(
+        apiUrl(`/api/dashboard/progress?venueId=${encodeURIComponent(nextVenueId)}`),
+        { credentials: "include" }
+      );
+
+      if (response.status === 401) {
+        stopProgressPolling();
+        return;
+      }
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await parseJson<DashboardLoadProgress>(response);
+      setLoadProgress(payload);
+
+      if (payload.done || payload.error) {
+        stopProgressPolling();
+      }
+    } catch {
+      stopProgressPolling();
+    }
+  }
+
+  function startProgressPolling(nextVenueId: string) {
+    stopProgressPolling();
+    setLoadProgress({
+      venueId: nextVenueId,
+      phase: "venue",
+      message: "Starting venue load...",
+      current: 0,
+      total: 0,
+      done: false,
+      error: null
+    });
+    progressPollId.current = window.setInterval(() => {
+      void fetchProgress(nextVenueId);
+    }, 1000);
+  }
+
+  async function requestDashboard(nextVenueId: string, refresh: boolean) {
+    const trimmedVenueId = nextVenueId.trim();
+    if (!trimmedVenueId) {
+      setDashboardError("Enter a venue ID before loading the workspace.");
+      return;
+    }
+
+    setIsLoadingDashboard(true);
+    setDashboardError(null);
+    startProgressPolling(trimmedVenueId);
+
+    try {
+      const response = await fetch(
+        apiUrl(`/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=${refresh ? "1" : "0"}`),
+        { credentials: "include" }
+      );
+
+      if (response.status === 401) {
+        clearClientSession();
+        setAuthError("Your OpenReview session expired. Sign in again to continue.");
+        setIsLoginOpen(true);
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = await parseJson<{ detail?: string }>(response);
+        throw new Error(payload.detail || "Could not load the selected venue.");
+      }
+
+      const payload = await parseJson<DashboardResponse>(response);
+      startTransition(() => {
+        setDashboard(payload);
+        setViewer(payload.viewer);
+        setVenueId(trimmedVenueId);
+        setActiveTab((current) =>
+          payload.venue.stage === "Commitment Stage" && current === "ac" ? "papers" : current
+        );
+      });
+      setLoadProgress({
+        venueId: trimmedVenueId,
+        phase: "ready",
+        message: `Loaded ${payload.summary.totalPapers} papers for this SAC batch.`,
+        current: payload.summary.totalPapers,
+        total: payload.summary.totalPapers,
+        done: true,
+        error: null
+      });
+      window.sessionStorage.setItem(VENUE_STORAGE_KEY, trimmedVenueId);
+      window.sessionStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify(payload.viewer));
+      setRecentVenueIds((currentVenueIds) => addRecentVenueId(trimmedVenueId, currentVenueIds));
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Unexpected dashboard error.";
+      setDashboardError(message);
+      setLoadProgress({
+        venueId: trimmedVenueId,
+        phase: "error",
+        message,
+        current: 0,
+        total: 0,
+        done: true,
+        error: message
+      });
+    } finally {
+      stopProgressPolling();
+      setIsLoadingDashboard(false);
+    }
+  }
+
+  async function handleLogin(username: string, password: string) {
+    if (!username || !password) {
+      setAuthError("Enter both your OpenReview email and password.");
+      return;
+    }
+
+    setIsAuthenticating(true);
+    setAuthError(null);
+
+    try {
+      const response = await fetch(apiUrl("/api/session/login"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        credentials: "include",
+        body: JSON.stringify({ username, password })
+      });
+
+      if (!response.ok) {
+        const payload = await parseJson<{ detail?: string }>(response);
+        throw new Error(payload.detail || "Login failed.");
+      }
+
+      const nextViewer = await parseJson<ViewerInfo>(response);
+      startTransition(() => {
+        setViewer(nextViewer);
+      });
+      window.sessionStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify(nextViewer));
+      setIsLoginOpen(false);
+    } catch (nextError) {
+      setAuthError(nextError instanceof Error ? nextError.message : "Unexpected login error.");
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }
+
+  async function handleLogout() {
+    await fetch(apiUrl("/api/session/logout"), {
+      method: "POST",
+      credentials: "include"
+    }).catch(() => undefined);
+    clearClientSession();
+  }
+
+  async function handleExport() {
+    if (!dashboard) {
+      setExportError("Load a venue before exporting.");
+      return;
+    }
+
+    setIsExporting(true);
+    setExportError(null);
+
+    try {
+      const response = await fetch(
+        apiUrl(`/api/dashboard/export?venueId=${encodeURIComponent(dashboard.venue.venueId)}`),
+        { credentials: "include" }
+      );
+
+      if (response.status === 401) {
+        clearClientSession();
+        setAuthError("Your OpenReview session expired. Sign in again to continue.");
+        setIsLoginOpen(true);
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = await parseJson<{ detail?: string }>(response);
+        throw new Error(payload.detail || "Could not export the selected venue.");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] ?? "paper_export.xlsx";
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (nextError) {
+      setExportError(nextError instanceof Error ? nextError.message : "Unexpected export error.");
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  function clearClientSession() {
+    window.sessionStorage.removeItem(VIEWER_STORAGE_KEY);
+    setViewer(null);
+    setDashboard(null);
+    setLoadProgress(null);
+    setAuthError(null);
+    setDashboardError(null);
+    setIsLoginOpen(false);
+  }
+
+  const isBusy = isAuthenticating || isLoadingDashboard;
+  const hasDashboard = dashboard !== null;
+  const visibleTabs = dashboard?.venue.stage === "Commitment Stage" ? COMMITMENT_TABS : TABS;
+  const selectedTab = visibleTabs.some((tab) => tab.key === activeTab) ? activeTab : "papers";
+  const venueStage = getVenueStage(venueId);
+
+  return (
+    <div className="shell">
+      <div className="shell-inner">
+        <header className="shell-header">
+          <Toolbar
+            activeTab={selectedTab}
+            isBusy={isBusy}
+            onLogin={() => {
+              setAuthError(null);
+              setIsLoginOpen(true);
+            }}
+            onLogout={() => void handleLogout()}
+            onTabChange={setActiveTab}
+            showTabs={viewer && dashboard ? true : false}
+            tabs={visibleTabs}
+            venueStage={venueStage}
+            viewer={viewer}
+          />
+        </header>
+
+        <main className="workspace">
+          <section className="workspace-top-grid">
+            <VenueWorkspacePanel
+              isBusy={isBusy}
+              lastSyncedAt={dashboard?.venue.lastSyncedAt}
+              loadProgress={loadProgress}
+              onLoad={() => void requestDashboard(venueId, false)}
+              onRefresh={() => void requestDashboard(venueId, true)}
+              onVenueIdChange={(value) => {
+                setVenueId(value);
+                window.sessionStorage.setItem(VENUE_STORAGE_KEY, value);
+              }}
+              recentVenueIds={recentVenueIds}
+              venueId={venueId}
+              viewer={viewer}
+            />
+          </section>
+
+          {dashboardError ? <div className="error-banner">{dashboardError}</div> : null}
+
+          {viewer && dashboard ? (
+            <>
+              <div className="panel-stack">
+                {selectedTab === "papers" ? (
+                  <PapersPanel
+                    exportError={exportError}
+                    isExporting={isExporting}
+                    onExport={() => void handleExport()}
+                    papers={dashboard.papers}
+                    venueStage={dashboard.venue.stage}
+                    withdrawnPapers={dashboard.withdrawnPapers ?? []}
+                  />
+                ) : null}
+                {selectedTab === "ac" ? (
+                  <ACDashboardPanel areaChairs={dashboard.areaChairs} papers={dashboard.papers} />
+                ) : null}
+                {selectedTab === "comments" ? <CommentsPanel comments={dashboard.comments} /> : null}
+                {selectedTab === "analytics" ? <AnalyticsPanel analytics={dashboard.analytics} /> : null}
+              </div>
+            </>
+          ) : null}
+
+        </main>
+
+        <LoginPanel
+          error={authError}
+          isBusy={isAuthenticating}
+          isOpen={isLoginOpen}
+          onClose={() => {
+            if (!isAuthenticating) {
+              setAuthError(null);
+              setIsLoginOpen(false);
+            }
+          }}
+          onLogin={handleLogin}
+        />
+      </div>
+    </div>
+  );
+}
