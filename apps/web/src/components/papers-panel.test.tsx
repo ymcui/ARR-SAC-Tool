@@ -162,10 +162,11 @@ describe("PapersPanel", () => {
     const table = screen.getByRole("table");
     const statusIcons = within(table).getAllByRole("img");
 
-    expect(statusIcons).toHaveLength(9);
+    expect(statusIcons).toHaveLength(10);
     expect(within(table).getByRole("img", { name: "Ready: Yes" })).toBeInTheDocument();
     expect(within(table).getAllByRole("img", { name: "Ready: No" })).toHaveLength(2);
     expect(within(table).getAllByRole("img", { name: "Responses: No" })).toHaveLength(2);
+    expect(within(table).getByRole("img", { name: "Meta-review: No" })).toBeInTheDocument();
     expect(within(table).queryByText("YES")).not.toBeInTheDocument();
     expect(within(table).queryByText("NO")).not.toBeInTheDocument();
   });

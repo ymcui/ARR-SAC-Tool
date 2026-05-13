@@ -84,6 +84,10 @@ function scoreBlock(
   );
 }
 
+function metaReviewCell(score: number | null) {
+  return score == null ? <TableBooleanIcon label="Meta-review" value={false} /> : formatScore(score);
+}
+
 function nextDirection(
   column: SortColumn,
   currentColumn: SortColumn,
@@ -144,7 +148,6 @@ function WithdrawnPapersPanel({ withdrawnPapers }: { withdrawnPapers: WithdrawnP
           <p className="eyebrow">Inactive submissions</p>
           <h2>Withdrawn Papers</h2>
         </div>
-        <p className="section-note">Withdrawn submissions in this SAC batch.</p>
       </div>
 
       <div className="table-scroll">
@@ -488,7 +491,7 @@ export function PapersPanel({
                         <td>
                           <TableBooleanIcon label="Issue report" value={paper.issueReport} />
                         </td>
-                        <td>{formatScore(paper.metaReviewScore)}</td>
+                        <td>{metaReviewCell(paper.metaReviewScore)}</td>
                         <td>{formatScore(paper.overallAssessment.average)}</td>
                         <td>{formatScore(paper.soundnessScore.average)}</td>
                         <td>{formatScore(paper.excitementScore.average)}</td>
@@ -508,7 +511,7 @@ export function PapersPanel({
                         <td>
                           <TableBooleanIcon label="Checklist" value={paper.acChecklistReady} />
                         </td>
-                        <td>{formatScore(paper.metaReviewScore)}</td>
+                        <td>{metaReviewCell(paper.metaReviewScore)}</td>
                         <td>{formatScoreSummary(paper.overallAssessment)}</td>
                       </>
                     )}

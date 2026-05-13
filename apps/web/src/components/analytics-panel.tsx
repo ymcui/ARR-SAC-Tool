@@ -29,10 +29,6 @@ export default function AnalyticsPanel({ analytics }: AnalyticsPanelProps) {
           <p className="eyebrow">Secondary analysis</p>
           <h2>Analytics</h2>
         </div>
-        <p className="section-note">
-          Optional score distributions and paired assessment scatter stay separate from the working
-          surface so the main review flow remains fast.
-        </p>
       </div>
 
       <div className="chart-grid">

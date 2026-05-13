@@ -71,9 +71,12 @@ describe("CommentsPanel", () => {
     expect(
       screen.getByRole("button", { name: /paper 42 a careful study of reviewer discussion dynamics 2 posts/i })
     ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Official Comment: 1")).toBeInTheDocument();
+    expect(screen.getByText("Author Response: 1")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /paper 88 improving meta-review readiness signals 1 post/i })
     ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Confidential Comment: 1")).toBeInTheDocument();
     expect(screen.queryByText("paper42")).not.toBeInTheDocument();
     expect(screen.queryByText("Please clarify the evaluation setup.")).not.toBeInTheDocument();
 

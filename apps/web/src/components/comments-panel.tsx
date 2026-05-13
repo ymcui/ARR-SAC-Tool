@@ -14,7 +14,6 @@ type CommentsPanelProps = {
 type CommentFilters = {
   search: string;
   type: string;
-  role: string;
 };
 
 function filterNodes(nodes: CommentRecord[], filters: CommentFilters): CommentRecord[] {
@@ -24,8 +23,7 @@ function filterNodes(nodes: CommentRecord[], filters: CommentFilters): CommentRe
       !filters.search ||
       `${node.paperNumber} ${node.content} ${node.role} ${node.type}`.toLowerCase().includes(filters.search);
     const typeHit = filters.type === "all" || node.type === filters.type;
-    const roleHit = filters.role === "all" || node.role === filters.role;
-    const includeSelf = searchHit && typeHit && roleHit;
+    const includeSelf = searchHit && typeHit;
 
     if (!includeSelf && filteredChildren.length === 0) {
       return [];
@@ -45,7 +43,7 @@ function CommentThread({ comment, depth = 0 }: { comment: CommentRecord; depth?:
     <article className="thread-node" style={{ marginLeft: `${depth * 20}px` }}>
       <div className="thread-meta">
         <div>
-          <span className="thread-type">{comment.type}</span>
+          <span className={`thread-type ${commentTypeClassName(comment.type)}`}>{comment.type}</span>
           <span className="thread-role">{comment.role}</span>
         </div>
         <span className="subtle-text">{comment.date || "Undated"}</span>
@@ -70,8 +68,32 @@ function CommentThread({ comment, depth = 0 }: { comment: CommentRecord; depth?:
   );
 }
 
+function commentTypeClassName(type: string) {
+  const normalizedType = type.toLowerCase();
+
+  if (normalizedType.includes("author-editor")) {
+    return "comment-type-author-editor";
+  }
+  if (normalizedType.includes("review issue")) {
+    return "comment-type-review-issue";
+  }
+
+  return "comment-type-comment";
+}
+
 function countComments(nodes: CommentRecord[]): number {
   return nodes.reduce((total, node) => total + 1 + countComments(node.children), 0);
+}
+
+function countCommentTypes(nodes: CommentRecord[], counts = new Map<string, number>()) {
+  nodes.forEach((node) => {
+    counts.set(node.type, (counts.get(node.type) ?? 0) + 1);
+    countCommentTypes(node.children, counts);
+  });
+
+  return [...counts.entries()].sort(([leftType], [rightType]) =>
+    leftType.localeCompare(rightType, undefined, { sensitivity: "base" })
+  );
 }
 
 function formatPostCount(count: number) {
@@ -81,20 +103,17 @@ function formatPostCount(count: number) {
 export function CommentsPanel({ comments }: CommentsPanelProps) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [roleFilter, setRoleFilter] = useState("all");
   const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(() => new Set());
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
   const types = [...new Set(comments.flatMap((group) => group.items.flatMap(flattenTypes)))].sort();
-  const roles = [...new Set(comments.flatMap((group) => group.items.flatMap(flattenRoles)))].sort();
 
   const filteredGroups = comments
     .map((group) => ({
       ...group,
       items: filterNodes(group.items, {
         search: deferredSearch,
-        type: typeFilter,
-        role: roleFilter
+        type: typeFilter
       })
     }))
     .filter((group) => group.items.length > 0);
@@ -117,51 +136,34 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
 
   return (
     <section className="panel">
-      <div className="section-header">
+      <div className="section-header comments-panel-header">
         <div>
           <p className="eyebrow">Exception handling</p>
           <h2>Comments</h2>
         </div>
-        <p className="section-note">
-          Threaded comments, confidential notes, and issue reports grouped by paper so follow-up is
-          easy to scan.
-        </p>
-      </div>
+        <div className="comments-header-controls">
+          <label className="field compact comments-search-field">
+            <span className="sr-only">Search</span>
+            <input
+              aria-label="Search comments"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Paper number, type, or content"
+              value={search}
+            />
+          </label>
 
-      <div className="filters-grid tight">
-        <label className="field compact">
-          <span>Search</span>
-          <input
-            aria-label="Search comments"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Paper number, type, or content"
-            value={search}
-          />
-        </label>
-
-        <label className="field compact">
-          <span>Type</span>
-          <select onChange={(event) => setTypeFilter(event.target.value)} value={typeFilter}>
-            <option value="all">All types</option>
-            {types.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="field compact">
-          <span>Role</span>
-          <select onChange={(event) => setRoleFilter(event.target.value)} value={roleFilter}>
-            <option value="all">All roles</option>
-            {roles.map((role) => (
-              <option key={role} value={role}>
-                {role}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="field compact comments-type-field">
+            <span className="sr-only">Type</span>
+            <select onChange={(event) => setTypeFilter(event.target.value)} value={typeFilter}>
+              <option value="all">All types</option>
+              {types.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {isEmptyDataset ? (
@@ -182,11 +184,13 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
         {filteredGroups.map((group) => {
           const expanded = expandedPaperIds.has(group.paperId);
           const postCount = countComments(group.items);
+          const typeBreakdown = countCommentTypes(group.items);
           const displayTitle = (group.paperTitle || "").trim() || `Paper ${group.paperNumber}`;
 
           return (
             <section className="paper-thread" key={group.paperId}>
               <button
+                aria-label={`Paper ${group.paperNumber} ${displayTitle} ${formatPostCount(postCount)}`}
                 aria-expanded={expanded}
                 className="paper-thread-header paper-thread-toggle"
                 onClick={() => togglePaperThread(group.paperId)}
@@ -195,6 +199,16 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
                 <div>
                   <p className="eyebrow">Paper {group.paperNumber}</p>
                   <h3 className="paper-thread-title">{displayTitle}</h3>
+                  <span className="paper-thread-breakdown" aria-label="Comment type breakdown">
+                    {typeBreakdown.map(([type, count]) => (
+                      <span
+                        className={`paper-thread-breakdown-item ${commentTypeClassName(type)}`}
+                        key={type}
+                      >
+                        {type}: {count}
+                      </span>
+                    ))}
+                  </span>
                 </div>
                 <span className="paper-thread-summary">
                   <span>{formatPostCount(postCount)}</span>
@@ -231,8 +245,4 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
 
 function flattenTypes(comment: CommentRecord): string[] {
   return [comment.type, ...comment.children.flatMap(flattenTypes)];
-}
-
-function flattenRoles(comment: CommentRecord): string[] {
-  return [comment.role, ...comment.children.flatMap(flattenRoles)];
 }

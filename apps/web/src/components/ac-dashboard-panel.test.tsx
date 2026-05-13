@@ -111,6 +111,8 @@ describe("ACDashboardPanel", () => {
 
     const table = screen.getByRole("table");
 
+    expect(screen.getByText("Missing meta-reviews")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
     expect(within(table).getAllByRole("img")).toHaveLength(4);
     expect(within(table).getByRole("img", { name: "All papers ready: Yes" })).toBeInTheDocument();
     expect(within(table).getByRole("img", { name: "All papers ready: No" })).toBeInTheDocument();
@@ -131,7 +133,8 @@ describe("ACDashboardPanel", () => {
     expect(await screen.findByText("A Paper Missing Reviews")).toBeInTheDocument();
     expect(screen.getByText("A Ready Paper Awaiting Meta-review")).toBeInTheDocument();
     expect(screen.getByText("1 / 3")).toBeInTheDocument();
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Meta-review: No" })).toBeInTheDocument();
+    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
     expect(screen.getByText("3.5")).toBeInTheDocument();
     expect(screen.queryByText("A Fully Reviewed Paper")).not.toBeInTheDocument();
   });

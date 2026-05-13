@@ -845,9 +845,29 @@ select {
   margin: 0;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .papers-panel-header {
   margin-bottom: 0.9rem;
   align-items: start;
+}
+
+.ac-dashboard-header-controls {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem;
 }
 
 .papers-header-controls {
@@ -927,6 +947,28 @@ select {
 
 .filters-grid.tight {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.comments-header-controls {
+  display: flex;
+  justify-content: flex-end;
+  align-items: end;
+  gap: 0.75rem;
+  flex-wrap: nowrap;
+}
+
+.comments-panel-header {
+  align-items: start;
+}
+
+.comments-search-field {
+  width: 21rem;
+  flex: 0 0 21rem;
+}
+
+.comments-type-field {
+  width: 14rem;
+  flex: 0 0 14rem;
 }
 
 .table-scroll {
@@ -1286,6 +1328,25 @@ select {
   white-space: nowrap;
 }
 
+.paper-thread-breakdown {
+  display: flex;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.5rem;
+  max-width: 58rem;
+}
+
+.paper-thread-breakdown-item {
+  border-radius: 0.28rem;
+  color: #263445;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 0.14rem 0.28rem;
+}
+
 .paper-thread-title {
   max-width: 68rem;
 }
@@ -1336,6 +1397,23 @@ select {
   background: rgba(49, 95, 214, 0.1);
   color: var(--accent-strong);
   font-size: 0.78rem;
+}
+
+.thread-type {
+  border-radius: 0.28rem;
+  color: #263445;
+}
+
+.comment-type-author-editor {
+  background: #c8ff7a;
+}
+
+.comment-type-review-issue {
+  background: #d891ff;
+}
+
+.comment-type-comment {
+  background: #d9ecff;
 }
 
 .thread-link {
@@ -1484,18 +1562,28 @@ select {
   }
 
   .papers-header-controls,
+  .ac-dashboard-header-controls,
+  .comments-header-controls,
   .papers-summary-pills,
   .papers-export-actions {
     justify-content: flex-start;
   }
 
   .papers-header-controls,
+  .ac-dashboard-header-controls,
+  .comments-header-controls,
   .papers-summary-pills,
   .papers-export-actions {
     flex-wrap: wrap;
   }
 
   .papers-header-search {
+    width: min(24rem, 100%);
+    flex: 0 1 24rem;
+  }
+
+  .comments-search-field,
+  .comments-type-field {
     width: min(24rem, 100%);
     flex: 0 1 24rem;
   }
@@ -1546,6 +1634,8 @@ select {
   }
 
   .papers-header-controls,
+  .ac-dashboard-header-controls,
+  .comments-header-controls,
   .papers-summary-pills,
   .papers-export-actions {
     justify-content: flex-start;

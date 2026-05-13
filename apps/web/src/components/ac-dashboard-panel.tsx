@@ -11,8 +11,16 @@ type ACDashboardPanelProps = {
   papers: PaperRecord[];
 };
 
+function metaReviewCell(score: number | null) {
+  return score == null ? <TableBooleanIcon label="Meta-review" value={false} /> : formatScore(score);
+}
+
 export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) {
   const [expandedAreaChair, setExpandedAreaChair] = useState<string | null>(null);
+  const missingMetaReviewsCount = areaChairs.reduce(
+    (total, record) => total + Math.max(0, record.numPapers - record.metaReviewsDone),
+    0
+  );
 
   function toggleAreaChairDetails(areaChair: string) {
     setExpandedAreaChair((currentAreaChair) => (currentAreaChair === areaChair ? null : areaChair));
@@ -25,9 +33,14 @@ export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) 
           <p className="eyebrow">Rollup view</p>
           <h2>AC Dashboard</h2>
         </div>
-        <p className="section-note">
-          Compare review completion, meta-review coverage, and checklist status across area chairs.
-        </p>
+        <div className="ac-dashboard-header-controls">
+          <div className="papers-summary-pills" aria-label="AC dashboard summary">
+            <div className="papers-summary-pill">
+              <span className="papers-summary-pill-label">Missing meta-reviews</span>
+              <span className="papers-summary-pill-value">{missingMetaReviewsCount}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="table-scroll">
@@ -140,7 +153,7 @@ export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) 
                                                 value={paper.acChecklistReady}
                                               />
                                             </td>
-                                            <td>{formatScore(paper.metaReviewScore)}</td>
+                                            <td>{metaReviewCell(paper.metaReviewScore)}</td>
                                             <td>{formatScoreSummary(paper.overallAssessment)}</td>
                                           </tr>
                                         );
