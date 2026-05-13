@@ -71,6 +71,8 @@ class WithdrawnPaperRecord(BaseModel):
 
 class AreaChairRecord(BaseModel):
     areaChair: str
+    areaChairName: str = ""
+    areaChairEmail: str = ""
     totalCompletedReviews: int
     totalExpectedReviews: int
     papersReady: int

@@ -56,6 +56,8 @@ const dashboardFixture: DashboardResponse = {
   areaChairs: [
     {
       areaChair: "~Area_Chair1",
+      areaChairName: "Area Chair One",
+      areaChairEmail: "chair1@example.com",
       totalCompletedReviews: 3,
       totalExpectedReviews: 3,
       papersReady: 1,

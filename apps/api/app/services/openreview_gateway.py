@@ -109,6 +109,200 @@ def _resolve_bulk_group_members(group: Any, groups_by_id: Dict[str, Any]) -> tup
     return resolved_members, not missing_anon_member
 
 
+def _profile_content(profile: Any) -> Dict[str, Any]:
+    content = getattr(profile, "content", None)
+    return content if isinstance(content, dict) else {}
+
+
+def _profile_email(profile: Any) -> str:
+    content = _profile_content(profile)
+    preferred_email = content.get("preferredEmail")
+    if _is_usable_email(preferred_email):
+        return str(preferred_email)
+
+    emails_confirmed = content.get("emailsConfirmed")
+    email = _first_usable_email(emails_confirmed)
+    if email:
+        return email
+
+    emails = content.get("emails")
+    email = _first_usable_email(emails)
+    if email:
+        return email
+
+    try:
+        preferred = profile.get_preferred_email()
+    except Exception:
+        return ""
+
+    return str(preferred) if _is_usable_email(preferred) else ""
+
+
+def _is_usable_email(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+
+    stripped = value.strip()
+    if "@" not in stripped or "*" in stripped:
+        return False
+
+    local_part, domain = stripped.split("@", 1)
+    return bool(local_part and domain and "." in domain)
+
+
+def _first_usable_email(values: Any) -> str:
+    if not isinstance(values, list):
+        return ""
+
+    for value in values:
+        if _is_usable_email(value):
+            return str(value)
+
+    return ""
+
+
+def _profile_group_email(client: Any, profile_id: str) -> str:
+    try:
+        group = client.get_group(profile_id)
+    except Exception:
+        return ""
+
+    return _first_usable_email(_group_members(group))
+
+
+def _profile_display_name(profile: Any, fallback: str) -> str:
+    content = _profile_content(profile)
+    names = content.get("names")
+    if isinstance(names, list) and names:
+        preferred_name = next(
+            (name for name in names if isinstance(name, dict) and name.get("preferred")),
+            None,
+        )
+        name = preferred_name or next((name for name in names if isinstance(name, dict)), None)
+        if name:
+            fullname = _content_text(name.get("fullname")).strip()
+            if fullname:
+                return fullname
+            parts = [
+                _content_text(name.get("first")).strip(),
+                _content_text(name.get("middle")).strip(),
+                _content_text(name.get("last")).strip(),
+            ]
+            joined = " ".join(part for part in parts if part)
+            if joined:
+                return joined
+
+    fullname = _content_text(content.get("preferredName")).strip()
+    if fullname:
+        return fullname
+
+    profile_fullname = _content_text(getattr(profile, "fullname", "")).strip()
+    if profile_fullname:
+        return profile_fullname
+
+    return _profile_id_to_display_name(fallback)
+
+
+def _profile_id_to_display_name(profile_id: str) -> str:
+    normalized = profile_id.strip().lstrip("~")
+    normalized = re.sub(r"\d+$", "", normalized)
+    normalized = normalized.replace("_", " ").strip()
+    return normalized or profile_id
+
+
+def _preferred_email_edges(client: Any, invitation_id: str) -> Dict[str, str]:
+    if not invitation_id:
+        return {}
+
+    try:
+        grouped_edges = client.get_grouped_edges(
+            invitation=invitation_id,
+            groupby="head",
+            select="tail",
+        )
+    except Exception:
+        logger.warning("Could not load preferred-email edges from %s", invitation_id, exc_info=True)
+        return {}
+
+    preferred_email_by_profile_id: Dict[str, str] = {}
+    for grouped_edge in grouped_edges:
+        head = str((grouped_edge.get("id") or {}).get("head") or "")
+        if not head:
+            continue
+        for value in grouped_edge.get("values", []) or []:
+            tail = value.get("tail") if isinstance(value, dict) else None
+            if _is_usable_email(tail):
+                preferred_email_by_profile_id[head] = str(tail)
+                break
+
+    return preferred_email_by_profile_id
+
+
+def _lookup_area_chair_contact(
+    client: Any,
+    profile_id: str,
+    preferred_email_by_profile_id: Dict[str, str],
+) -> Dict[str, str]:
+    try:
+        profile = client.get_profile(profile_id)
+    except Exception:
+        try:
+            profiles = client.search_profiles(ids=[profile_id])
+            profile = profiles[0] if profiles else None
+        except Exception:
+            profile = None
+
+    if profile is None:
+        logger.warning("Could not resolve OpenReview profile for area chair %s", profile_id)
+        return {
+            "name": _profile_id_to_display_name(profile_id),
+            "email": "",
+        }
+
+    edge_email = preferred_email_by_profile_id.get(profile_id, "")
+    email = (
+        edge_email
+        if _is_usable_email(edge_email)
+        else _profile_email(profile) or _profile_group_email(client, profile_id)
+    )
+
+    return {
+        "name": _profile_display_name(profile, profile_id),
+        "email": email,
+    }
+
+
+def _area_chair_contacts(
+    client: Any,
+    submissions: List[Dict[str, Any]],
+    preferred_emails_invitation_id: str,
+) -> Dict[str, Dict[str, str]]:
+    area_chair_ids = sorted(
+        {
+            str(area_chair)
+            for submission in submissions
+            for area_chair in submission.get("area_chairs", []) or []
+            if str(area_chair).strip()
+        }
+    )
+    if not area_chair_ids:
+        return {}
+
+    started_at = time.perf_counter()
+    preferred_email_by_profile_id = _preferred_email_edges(client, preferred_emails_invitation_id)
+    contacts = {
+        area_chair_id: _lookup_area_chair_contact(client, area_chair_id, preferred_email_by_profile_id)
+        for area_chair_id in area_chair_ids
+    }
+    logger.warning(
+        "Dashboard load phase area_chair_contacts completed in %.2fs: profiles=%s emails=%s",
+        time.perf_counter() - started_at,
+        len(contacts),
+        sum(1 for contact in contacts.values() if contact.get("email")),
+    )
+    return contacts
+
+
 def _is_withdrawn(content: Dict[str, Any]) -> bool:
     withdrawal = _content_text(content.get("withdrawal_confirmation"))
     if withdrawal.strip():
@@ -188,6 +382,10 @@ class OpenReviewGateway:
             phase_started_at = time.perf_counter()
             venue_group = client.get_group(venue_id)
             submission_name = _content_value(venue_group.content.get("submission_name"), "Submission")
+            preferred_emails_invitation_id = (
+                _content_value(venue_group.content.get("preferred_emails_id"), "").strip()
+                or f"{venue_id}/-/Preferred_Emails"
+            )
             logger.warning(
                 "Dashboard load phase venue_metadata completed in %.2fs for %s",
                 time.perf_counter() - phase_started_at,
@@ -509,6 +707,12 @@ class OpenReviewGateway:
             len(collected_withdrawn_submissions),
         )
 
+        area_chair_contacts = _area_chair_contacts(
+            client,
+            collected_submissions,
+            preferred_emails_invitation_id,
+        )
+
         return {
             "viewer": {
                 "id": viewer_id,
@@ -518,6 +722,7 @@ class OpenReviewGateway:
             "my_sac_groups": sorted(my_sac_groups),
             "submissions": collected_submissions,
             "withdrawn_submissions": collected_withdrawn_submissions,
+            "area_chair_contacts": area_chair_contacts,
         }
 
     def _fetch_commitment_dashboard_snapshot(

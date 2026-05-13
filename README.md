@@ -100,6 +100,15 @@ In `AC Dashboard`, you can check each AC's assigned papers and their review stat
     <br>
 </p>
 
+Clicking on an AC will show the papers assigned to that AC and their review status. There is also a button to copy AC's email address for easy communication, which is especially useful for SACs to contact ACs personally (as some people may not receive notifications from OpenReview).
+
+<p align="center">
+    <br>
+    <img src="./assets/4-ac-dashboard-detail.png" width="800"/>
+    <br>
+</p>
+
+
 ### Page: Comments
 
 In `Comments`, you can check critical comments that need to draw SAC attention, such as author-editor confidential comments, review issue reports, etc.

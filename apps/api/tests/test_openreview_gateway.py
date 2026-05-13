@@ -11,16 +11,37 @@ class FakeClient:
         self.note_requests: list[tuple[str, str]] = []
         self.group_requests: list[str] = []
         self.all_group_requests: list[tuple[str | None, str]] = []
+        self.grouped_edge_requests: list[tuple[str, str, str]] = []
+        self.profile_requests: list[str] = []
 
     def get_group(self, group_id: str):
         self.group_requests.append(group_id)
         if group_id == "aclweb.org/ACL/ARR/2026/March":
-            return SimpleNamespace(content={"submission_name": {"value": "Submission"}})
+            return SimpleNamespace(
+                content={
+                    "submission_name": {"value": "Submission"},
+                    "preferred_emails_id": {"value": "aclweb.org/ACL/ARR/2026/March/-/Preferred_Emails"},
+                }
+            )
+        if group_id == "~Area_ChairShared":
+            return SimpleNamespace(members=["area_chairshared@example.com"])
         if group_id.endswith("/Area_Chairs"):
             return SimpleNamespace(members=["~Area_Chair"])
         if group_id.endswith("/Reviewers"):
             return SimpleNamespace(members=["~Reviewer1", "~Reviewer2", "~Reviewer3"])
         raise AssertionError(f"Unexpected group lookup: {group_id}")
+
+    def get_grouped_edges(self, invitation: str, groupby: str, select: str):
+        self.grouped_edge_requests.append((invitation, groupby, select))
+        assert invitation == "aclweb.org/ACL/ARR/2026/March/-/Preferred_Emails"
+        assert groupby == "head"
+        assert select == "tail"
+        return [
+            {
+                "id": {"head": "~Area_ChairShared"},
+                "values": [{"tail": "preferred-chair@example.com"}],
+            }
+        ]
 
     def get_all_groups(self, prefix: str, members: str | None = None):
         assert prefix == "aclweb.org/ACL/ARR/2026/March/Submission"
@@ -104,6 +125,17 @@ class FakeClient:
             ),
         ]
 
+    def get_profile(self, profile_id: str):
+        self.profile_requests.append(profile_id)
+        display_name = profile_id.strip("~").replace("_", " ")
+        return SimpleNamespace(
+            id=profile_id,
+            content={
+                "names": [{"fullname": display_name, "preferred": True}],
+                "preferredEmail": "****@example.com",
+            },
+        )
+
     def get_all_notes(self, invitation: str, details: str):
         assert invitation == "aclweb.org/ACL/ARR/2026/March/-/Submission"
         assert details == "replies"
@@ -169,6 +201,14 @@ def test_gateway_bulk_fetches_assignment_groups_after_filtering_submissions() ->
     assert snapshot["submissions"][0]["area_chairs"] == ["~Area_ChairShared"]
     assert snapshot["submissions"][1]["area_chairs"] == ["~Area_ChairShared"]
     assert snapshot["submissions"][1]["reviewers"] == ["~Reviewer4", "~Reviewer5", "~Reviewer6"]
+    assert snapshot["area_chair_contacts"]["~Area_ChairShared"] == {
+        "name": "Area ChairShared",
+        "email": "preferred-chair@example.com",
+    }
+    assert client.grouped_edge_requests == [
+        ("aclweb.org/ACL/ARR/2026/March/-/Preferred_Emails", "head", "tail")
+    ]
+    assert client.profile_requests == ["~Area_ChairShared"]
     assert [submission["number"] for submission in snapshot["withdrawn_submissions"]] == [99]
     assert snapshot["withdrawn_submissions"][0]["area_chairs"] == ["~Area_ChairWithdrawn"]
     assert ("~Test_SAC1", "aclweb.org/ACL/ARR/2026/March/Submission") in client.all_group_requests

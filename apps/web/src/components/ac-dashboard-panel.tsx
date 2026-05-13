@@ -15,15 +15,53 @@ function metaReviewCell(score: number | null) {
   return score == null ? <TableBooleanIcon label="Meta-review" value={false} /> : formatScore(score);
 }
 
+function profileIdDisplayName(profileId: string) {
+  const normalized = profileId.replace(/^~/, "").replace(/\d+$/, "").replaceAll("_", " ").trim();
+  return normalized || profileId;
+}
+
+function formatRecipient(record: AreaChairRecord) {
+  const email = record.areaChairEmail.trim();
+  if (!email) {
+    return "";
+  }
+
+  const name = (record.areaChairName || profileIdDisplayName(record.areaChair)).trim();
+  return name ? `${name} <${email}>` : email;
+}
+
+function formatRecipientList(records: AreaChairRecord[]) {
+  return records.map(formatRecipient).filter(Boolean).join("; ");
+}
+
 export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) {
   const [expandedAreaChair, setExpandedAreaChair] = useState<string | null>(null);
+  const [copiedEmail, setCopiedEmail] = useState<{ target: string; preview: string } | null>(null);
   const missingMetaReviewsCount = areaChairs.reduce(
     (total, record) => total + Math.max(0, record.numPapers - record.metaReviewsDone),
     0
   );
+  const areaChairsWithEmails = areaChairs.filter((record) => record.areaChairEmail);
+  const areaChairEmails = formatRecipientList(areaChairsWithEmails);
 
   function toggleAreaChairDetails(areaChair: string) {
     setExpandedAreaChair((currentAreaChair) => (currentAreaChair === areaChair ? null : areaChair));
+  }
+
+  async function copyEmails(text: string, target: string) {
+    if (!text) {
+      return;
+    }
+
+    if (!navigator.clipboard?.writeText) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(text);
+    setCopiedEmail({ target, preview: text });
+    window.setTimeout(() => {
+      setCopiedEmail((currentEmail) => (currentEmail?.target === target ? null : currentEmail));
+    }, 4200);
   }
 
   return (
@@ -39,6 +77,17 @@ export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) 
               <span className="papers-summary-pill-label">Missing meta-reviews</span>
               <span className="papers-summary-pill-value">{missingMetaReviewsCount}</span>
             </div>
+            <button
+              aria-label={`Copy emails for all ${areaChairsWithEmails.length} meta-reviewers`}
+              className="copy-all-emails-button"
+              disabled={!areaChairEmails}
+              onClick={() => copyEmails(areaChairEmails, "all-meta-reviewers")}
+              type="button"
+            >
+              {copiedEmail?.target === "all-meta-reviewers"
+                ? `Copied ${areaChairsWithEmails.length} ${areaChairsWithEmails.length === 1 ? "email" : "emails"}`
+                : "Copy all emails"}
+            </button>
           </div>
         </div>
       </div>
@@ -59,6 +108,7 @@ export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) 
           <tbody>
             {areaChairs.map((record) => {
               const expanded = expandedAreaChair === record.areaChair;
+              const recipient = formatRecipient(record);
               const assignedPapers = papers
                 .filter((paper) => paper.areaChair === record.areaChair)
                 .sort((left, right) => left.paperNumber - right.paperNumber);
@@ -99,9 +149,23 @@ export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) 
                         <div className="collapsible-shell">
                           <div className="collapsible-inner">
                             <div className="detail-panel-content ac-paper-detail">
-                              <div className="paper-detail-title">
-                                <span className="score-label">Assigned papers</span>
-                                <h3>{record.areaChair}</h3>
+                              <div className="paper-detail-title ac-paper-detail-title">
+                                <div>
+                                  <span className="score-label">Assigned papers</span>
+                                  <h3>{record.areaChair}</h3>
+                                </div>
+                                <button
+                                  aria-label={`Copy email for ${recipient || record.areaChair}`}
+                                  className="copy-email-button"
+                                  disabled={!recipient}
+                                  onClick={() => copyEmails(recipient, record.areaChair)}
+                                  title={recipient || undefined}
+                                  type="button"
+                                >
+                                  {copiedEmail?.target === record.areaChair
+                                    ? `Copied! ${copiedEmail.preview}`
+                                    : "Copy email"}
+                                </button>
                               </div>
 
                               {assignedPapers.length > 0 ? (

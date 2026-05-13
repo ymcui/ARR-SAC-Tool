@@ -938,6 +938,40 @@ select {
   line-height: 1;
 }
 
+.copy-all-emails-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.55rem;
+  max-width: min(34rem, 100%);
+  border: 0;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  box-shadow: 0 14px 30px rgba(49, 95, 214, 0.24);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.1;
+  overflow: hidden;
+  padding: 0.68rem 1.05rem;
+  text-overflow: ellipsis;
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+  white-space: nowrap;
+}
+
+.copy-all-emails-button:not(:disabled):hover {
+  box-shadow: 0 18px 34px rgba(49, 95, 214, 0.3);
+  filter: brightness(1.02);
+  transform: translateY(-1px);
+}
+
+.copy-all-emails-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+}
+
 .filters-grid {
   display: grid;
   gap: 0.85rem;
@@ -1162,6 +1196,48 @@ select {
   font-family: var(--font-display);
   font-size: 1.2rem;
   line-height: 1.25;
+}
+
+.ac-paper-detail-title {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.8rem;
+}
+
+.copy-email-button {
+  align-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  max-width: min(28rem, 100%);
+  border: 0;
+  border-radius: 0.78rem;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  box-shadow: 0 10px 22px rgba(49, 95, 214, 0.2);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.1;
+  overflow: hidden;
+  padding: 0.46rem 0.72rem;
+  text-overflow: ellipsis;
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+  white-space: nowrap;
+}
+
+.copy-email-button:not(:disabled):hover {
+  box-shadow: 0 13px 26px rgba(49, 95, 214, 0.26);
+  filter: brightness(1.02);
+  transform: translateY(-1px);
+}
+
+.copy-email-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
 }
 
 .ac-paper-detail {

@@ -61,6 +61,8 @@ export type WithdrawnPaperRecord = {
 
 export type AreaChairRecord = {
   areaChair: string;
+  areaChairName: string;
+  areaChairEmail: string;
   totalCompletedReviews: number;
   totalExpectedReviews: number;
   papersReady: number;

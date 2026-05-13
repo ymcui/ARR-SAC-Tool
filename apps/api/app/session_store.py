@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from app.schemas import DashboardLoadProgress, DashboardResponse, ViewerInfo
 
-DASHBOARD_CACHE_VERSION = 6
+DASHBOARD_CACHE_VERSION = 9
 
 
 def _model_dump(model: Any) -> dict:

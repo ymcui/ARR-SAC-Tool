@@ -1,13 +1,28 @@
 import { createElement } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
 
 import { ACDashboardPanel } from "@/components/ac-dashboard-panel";
 import type { AreaChairRecord, PaperRecord } from "@/lib/types";
 
+let writeTextMock: ReturnType<typeof vi.fn>;
+
+function mockClipboard() {
+  writeTextMock = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: writeTextMock
+    }
+  });
+}
+
 const areaChairsFixture: AreaChairRecord[] = [
   {
     areaChair: "~Area_ChairReady",
+    areaChairName: "Ready Chair",
+    areaChairEmail: "ready@example.com",
     totalCompletedReviews: 6,
     totalExpectedReviews: 6,
     papersReady: 2,
@@ -19,6 +34,8 @@ const areaChairsFixture: AreaChairRecord[] = [
   },
   {
     areaChair: "~Area_ChairPending",
+    areaChairName: "Pending Chair",
+    areaChairEmail: "pending@example.com",
     totalCompletedReviews: 4,
     totalExpectedReviews: 6,
     papersReady: 1,
@@ -106,13 +123,18 @@ const papersFixture: PaperRecord[] = [
 ];
 
 describe("ACDashboardPanel", () => {
+  beforeEach(() => {
+    mockClipboard();
+  });
+
   it("uses icon status markers for boolean table values", () => {
     render(createElement(ACDashboardPanel, { areaChairs: areaChairsFixture, papers: papersFixture }));
 
     const table = screen.getByRole("table");
+    const summary = screen.getByLabelText("AC dashboard summary");
 
-    expect(screen.getByText("Missing meta-reviews")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(within(summary).getByText("Missing meta-reviews")).toBeInTheDocument();
+    expect(within(summary).getByText("1")).toBeInTheDocument();
     expect(within(table).getAllByRole("img")).toHaveLength(4);
     expect(within(table).getByRole("img", { name: "All papers ready: Yes" })).toBeInTheDocument();
     expect(within(table).getByRole("img", { name: "All papers ready: No" })).toBeInTheDocument();
@@ -122,9 +144,24 @@ describe("ACDashboardPanel", () => {
     expect(within(table).queryByText("No")).not.toBeInTheDocument();
   });
 
+  it("copies all meta-reviewer emails in mail-client friendly format", async () => {
+    render(createElement(ACDashboardPanel, { areaChairs: areaChairsFixture, papers: papersFixture }));
+    const user = userEvent.setup();
+    mockClipboard();
+
+    const copyAllButton = screen.getByRole("button", { name: /copy emails for all 2 meta-reviewers/i });
+    await user.click(copyAllButton);
+
+    expect(writeTextMock).toHaveBeenCalledWith(
+      "Ready Chair <ready@example.com>; Pending Chair <pending@example.com>"
+    );
+    expect(copyAllButton).toHaveTextContent("Copied 2 emails");
+  });
+
   it("reveals assigned papers and their stats when clicking a table row", async () => {
     render(createElement(ACDashboardPanel, { areaChairs: areaChairsFixture, papers: papersFixture }));
     const user = userEvent.setup();
+    mockClipboard();
 
     expect(screen.queryByText("A Paper Missing Reviews")).not.toBeInTheDocument();
 
@@ -136,6 +173,12 @@ describe("ACDashboardPanel", () => {
     expect(screen.getByRole("img", { name: "Meta-review: No" })).toBeInTheDocument();
     expect(screen.queryByText("Pending")).not.toBeInTheDocument();
     expect(screen.getByText("3.5")).toBeInTheDocument();
+    const copyEmailButton = screen.getByRole("button", {
+      name: "Copy email for Pending Chair <pending@example.com>"
+    });
+    await user.click(copyEmailButton);
+    expect(writeTextMock).toHaveBeenLastCalledWith("Pending Chair <pending@example.com>");
+    expect(copyEmailButton).toHaveTextContent("Copied! Pending Chair <pending@example.com>");
     expect(screen.queryByText("A Fully Reviewed Paper")).not.toBeInTheDocument();
   });
 });

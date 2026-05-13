@@ -15,6 +15,10 @@ def load_fixture() -> dict:
 
 def test_build_dashboard_response_matches_notebook_rules() -> None:
     snapshot = load_fixture()
+    snapshot["area_chair_contacts"] = {
+        "~Area_Chair1": {"name": "Area Chair One", "email": "chair1@example.com"},
+        "~Area_Chair2": {"name": "Area Chair Two", "email": "chair2@example.com"},
+    }
     response = build_dashboard_response(snapshot, "aclweb.org/ACL/ARR/2026/March")
 
     assert response.venue.stage == "ARR Stage"
@@ -59,6 +63,8 @@ def test_build_dashboard_response_matches_notebook_rules() -> None:
     assert issue_comment.children[0].noteId == "comment-reply"
 
     assert [record.areaChair for record in response.areaChairs] == ["~Area_Chair1", "~Area_Chair2"]
+    assert response.areaChairs[0].areaChairName == "Area Chair One"
+    assert response.areaChairs[0].areaChairEmail == "chair1@example.com"
     assert response.areaChairs[0].allReviewsReady is True
     assert response.areaChairs[1].allMetaReviewsReady is True
 

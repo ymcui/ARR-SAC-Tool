@@ -47,6 +47,7 @@ def build_dashboard_response(
     my_sac_groups = set(snapshot.get("my_sac_groups", []))
     submissions = snapshot.get("submissions", [])
     withdrawn_submissions = snapshot.get("withdrawn_submissions", [])
+    area_chair_contacts = snapshot.get("area_chair_contacts", {})
 
     papers: List[PaperRecord] = []
     withdrawn_papers: List[WithdrawnPaperRecord] = []
@@ -104,7 +105,7 @@ def build_dashboard_response(
     assemble_started_at = time.perf_counter()
     papers.sort(key=lambda item: item.paperNumber)
     comment_groups = _build_comment_groups(comment_entries)
-    area_chair_records = _build_area_chair_records(papers)
+    area_chair_records = _build_area_chair_records(papers, area_chair_contacts)
     analytics = _build_analytics(papers)
     comment_count = sum(_count_comments(group.items) for group in comment_groups)
     logger.warning(
@@ -312,7 +313,10 @@ def _build_withdrawn_paper_record(submission: Dict[str, Any]) -> WithdrawnPaperR
     )
 
 
-def _build_area_chair_records(papers: List[PaperRecord]) -> List[AreaChairRecord]:
+def _build_area_chair_records(
+    papers: List[PaperRecord],
+    area_chair_contacts: Dict[str, Dict[str, str]],
+) -> List[AreaChairRecord]:
     grouped: Dict[str, Dict[str, int]] = defaultdict(
         lambda: {
             "completed": 0,
@@ -336,6 +340,8 @@ def _build_area_chair_records(papers: List[PaperRecord]) -> List[AreaChairRecord
     results = [
         AreaChairRecord(
             areaChair=area_chair,
+            areaChairName=str(area_chair_contacts.get(area_chair, {}).get("name", "")),
+            areaChairEmail=str(area_chair_contacts.get(area_chair, {}).get("email", "")),
             totalCompletedReviews=values["completed"],
             totalExpectedReviews=values["expected"],
             papersReady=values["ready"],
