@@ -5,7 +5,8 @@ A local dashboard for ACL Rolling Review and ACL commitment-stage Senior Area Ch
 SAC Monitor helps you load your assigned OpenReview venue, inspect paper status, read comments, review score distributions, and export commitment-stage papers to Excel for offline ranking. It runs on your own machine and uses your OpenReview login only for the current local session.
 
 > [!NOTE]
-> If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle.
+> 1. If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle.
+> 2. If you want to run the dashboard in a Colab notebook, please check the "[Running In Colab](#running-in-colab)" section below for instructions. 
 
 ## Latest Supported Venues
 
@@ -146,6 +147,35 @@ The main goal of commitment stage for SACs is to rank the papers and give a reco
 > [!CAUTION]
 >  Please do not solely rely on the exported Excel file for ranking, as it may not contain all the information you need (like detailed reviews, etc.). Always check the original OpenReview page for each paper to get the full context before making your final decision.
 
+## Running In Colab
+
+You can check this notebook, which contains step-by-step instructions to run the dashboard in Colab: [ARR SAC Tool in Colab](https://colab.research.google.com/drive/1b-jFIEwWNPZVPwTS_FL8iQoVe4ijj6TL?usp=sharing).
+
+Colab is not the ideal home for this dashboard, because the app is designed as a local web dashboard with a Next.js frontend and a FastAPI backend. It can run there for temporary use, though, as long as you expose only the web port and let Next proxy API requests to the backend.
+
+In a Colab notebook, after cloning the repository:
+
+```bash
+%cd arr_sac_tool
+!npm install
+```
+
+Build the web app, then start the production servers with the web server bound to all interfaces:
+
+```bash
+!ARR_SAC_USE_SYSTEM_PYTHON=1 ARR_SAC_API_PYTHON=python3 npm run build
+!ARR_SAC_USE_SYSTEM_PYTHON=1 ARR_SAC_API_PYTHON=python3 ARR_SAC_WEB_HOST=0.0.0.0 npm run start
+```
+
+Expose port `8000` with a temporary Cloudflare tunnel:
+
+```bash
+!wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+!chmod +x cloudflared
+!./cloudflared tunnel --url http://127.0.0.1:8000
+```
+
+Open the `https://....trycloudflare.com` URL printed by `cloudflared`. Keep both the `npm run start` cell and the tunnel cell running while you use the dashboard. The backend remains private inside the Colab runtime on port `8001`; browser requests go through the frontend's `/api` proxy.
 
 ## Privacy
 

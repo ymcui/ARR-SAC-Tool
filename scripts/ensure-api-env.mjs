@@ -7,6 +7,10 @@ const root = process.cwd();
 const venvPython = join(root, ".venv", "bin", "python");
 const requirementsPath = join(root, "apps", "api", "requirements.txt");
 const stampPath = join(root, ".venv", ".requirements-stamp");
+const systemStampPath = join(root, ".api-requirements-stamp");
+const useSystemPython =
+  process.env.ARR_SAC_USE_SYSTEM_PYTHON === "1" || Boolean(process.env.COLAB_RELEASE_TAG);
+const backendPython = process.env.ARR_SAC_API_PYTHON ?? (useSystemPython ? "python3" : venvPython);
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -25,13 +29,13 @@ function hashFile(path) {
   return hash.digest("hex");
 }
 
-function hasBackendModules() {
-  if (!existsSync(venvPython)) {
+function hasBackendModules(pythonCommand) {
+  if (!useSystemPython && !existsSync(pythonCommand)) {
     return false;
   }
 
   const result = spawnSync(
-    venvPython,
+    pythonCommand,
     ["-c", "import fastapi, uvicorn, openreview, pytest"],
     {
       cwd: root,
@@ -42,20 +46,21 @@ function hasBackendModules() {
   return result.status === 0;
 }
 
-if (!existsSync(venvPython)) {
+if (!useSystemPython && !existsSync(venvPython)) {
   run("python3", ["-m", "venv", ".venv"]);
 }
 
 const desiredStamp = hashFile(requirementsPath);
-const currentStamp = existsSync(stampPath) ? readFileSync(stampPath, "utf8").trim() : "";
-const modulesReady = hasBackendModules();
+const activeStampPath = useSystemPython ? systemStampPath : stampPath;
+const currentStamp = existsSync(activeStampPath) ? readFileSync(activeStampPath, "utf8").trim() : "";
+const modulesReady = hasBackendModules(backendPython);
 
 if (modulesReady && !currentStamp) {
-  writeFileSync(stampPath, `${desiredStamp}\n`);
+  writeFileSync(activeStampPath, `${desiredStamp}\n`);
   process.exit(0);
 }
 
 if (!modulesReady || currentStamp !== desiredStamp) {
-  run(venvPython, ["-m", "pip", "install", "-r", requirementsPath]);
-  writeFileSync(stampPath, `${desiredStamp}\n`);
+  run(backendPython, ["-m", "pip", "install", "-r", requirementsPath]);
+  writeFileSync(activeStampPath, `${desiredStamp}\n`);
 }

@@ -43,9 +43,7 @@ async function parseJson<T>(response: Response): Promise<T> {
 }
 
 function apiUrl(path: string): string {
-  const host = typeof window === "undefined" ? "127.0.0.1" : window.location.hostname || "127.0.0.1";
-  const protocol = typeof window === "undefined" ? "http:" : window.location.protocol;
-  return `${protocol}//${host}:8001${path}`;
+  return path;
 }
 
 function getVenueStage(venueId: string): VenueStage {

@@ -23,8 +23,7 @@ const commands = [
       "--host",
       apiHost,
       "--port",
-      apiPort,
-      "--reload"
+      apiPort
     ]
   },
   {
@@ -32,7 +31,7 @@ const commands = [
     command: npmCommand,
     args: [
       "run",
-      "dev",
+      "start",
       "--workspace",
       "@arr-sac/web",
       "--",
