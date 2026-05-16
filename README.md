@@ -177,6 +177,9 @@ Expose port `8000` with a temporary Cloudflare tunnel:
 
 Open the `https://....trycloudflare.com` URL printed by `cloudflared`. Keep both the `npm run start` cell and the tunnel cell running while you use the dashboard. The backend remains private inside the Colab runtime on port `8001`; browser requests go through the frontend's `/api` proxy.
 
+> [!CAUTION]
+> Treat the tunnel URL as private. Do not share it, and stop the tunnel cell when you are done.
+
 ## Privacy
 
 - Your OpenReview credentials are sent only to the local backend running on your machine.
