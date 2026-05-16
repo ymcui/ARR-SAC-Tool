@@ -2,6 +2,7 @@
 
 import { joinClasses } from "@/lib/format";
 import type { TabKey, VenueStage, ViewerInfo } from "@/lib/types";
+import { VersionUpdateNotice } from "@/components/version-update-notice";
 
 type ToolbarProps = {
   viewer: ViewerInfo | null;
@@ -61,6 +62,7 @@ export function Toolbar({
               <span className={joinClasses("status-chip", venueStage === "ARR Stage" ? "arr-stage" : "commitment-stage")}>
                 {venueStage}
               </span>
+              <VersionUpdateNotice />
             </div>
           </div>
         </div>

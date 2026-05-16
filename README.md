@@ -4,18 +4,18 @@ A local dashboard for ACL Rolling Review and ACL commitment-stage Senior Area Ch
 
 SAC Monitor helps you load your assigned OpenReview venue, inspect paper status, read comments, review score distributions, and export commitment-stage papers to Excel for offline ranking. It runs on your own machine and uses your OpenReview login only for the current local session.
 
+![banner](./assets/banner.jpg)
+
 > [!NOTE]
-> 1. If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle.
-> 2. If you want to run the dashboard in a Colab notebook, please check the "[Running In Colab](#running-in-colab)" section below for instructions. 
+> 1. **Use the latest code when available (an icon will show if there are updates) to get the latest features and bug fixes.**
+> 2. If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle.
+> 3. If you want to run the dashboard in a Colab notebook, please check the "[Running In Colab](#running-in-colab)" section below for instructions. 
 
 ## Latest Supported Venues
 
-ARR Stage:
-- aclweb.org/ACL/ARR/2026/March
-- aclweb.org/ACL/ARR/2026/January
-
-Commitment Stage:
-- aclweb.org/ACL/2026/Conference
+| ARR Stage                                                    | Commitment Stage               |
+| ------------------------------------------------------------ | ------------------------------ |
+| aclweb.org/ACL/ARR/2026/January <br/>aclweb.org/ACL/ARR/2026/March | aclweb.org/ACL/2026/Conference |
 
 ## Requirements
 
@@ -34,7 +34,7 @@ Just run:
 npm install
 ```
 
-You only need to run `npm install` once after downloading the repository, or again later if the project dependencies change.
+You only need to run `npm install` once after downloading the repository, or again later if the project dependencies change (not often).
 
 ## Start The Dashboard
 
@@ -151,7 +151,7 @@ The main goal of commitment stage for SACs is to rank the papers and give a reco
 
 You can check this notebook, which contains step-by-step instructions to run the dashboard in Colab: [ARR SAC Tool in Colab](https://colab.research.google.com/drive/1b-jFIEwWNPZVPwTS_FL8iQoVe4ijj6TL?usp=sharing).
 
-Colab is not the ideal home for this dashboard, because the app is designed as a local web dashboard with a Next.js frontend and a FastAPI backend. It can run there for temporary use, though, as long as you expose only the web port and let Next proxy API requests to the backend.
+**Colab is not the ideal home for this dashboard**, because the app is designed as a local web dashboard with a Next.js frontend and a FastAPI backend. It can run there for temporary use, though, as long as you expose only the web port and let Next proxy API requests to the backend.
 
 In a Colab notebook, after cloning the repository:
 

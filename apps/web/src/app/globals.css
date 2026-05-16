@@ -555,6 +555,24 @@ select {
   background: rgba(255, 239, 242, 0.94);
 }
 
+.status-chip.update-available {
+  color: #7a4b08;
+  border-color: rgba(177, 111, 19, 0.24);
+  background: rgba(255, 244, 218, 0.98);
+  text-decoration: none;
+}
+
+.status-chip.update-available:hover {
+  border-color: rgba(177, 111, 19, 0.38);
+  box-shadow: 0 12px 28px rgba(177, 111, 19, 0.11);
+}
+
+.update-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+}
+
 .workspace {
   display: grid;
   gap: 1.2rem;

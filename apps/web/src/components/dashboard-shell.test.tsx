@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import type { DashboardResponse } from "@/lib/types";
+import { GITHUB_PACKAGE_URL } from "@/lib/version";
 
 function createResponse(data: unknown, ok = true, status = 200): Response {
   return {
@@ -11,6 +12,27 @@ function createResponse(data: unknown, ok = true, status = 200): Response {
     status,
     json: async () => data
   } as Response;
+}
+
+function createFetchMock(...responses: Response[]) {
+  const pendingResponses = [...responses];
+
+  return vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === GITHUB_PACKAGE_URL) {
+      return createResponse({ version: "2.1.2" });
+    }
+
+    const nextResponse = pendingResponses.shift();
+    if (!nextResponse) {
+      throw new Error(`Unexpected fetch call: ${String(input)}`);
+    }
+
+    return nextResponse;
+  });
+}
+
+function appFetchCalls(fetchMock: ReturnType<typeof createFetchMock>) {
+  return fetchMock.mock.calls.filter(([input]) => String(input) !== GITHUB_PACKAGE_URL);
 }
 
 const dashboardFixture: DashboardResponse = {
@@ -90,10 +112,10 @@ const commitmentDashboardFixture: DashboardResponse = {
 
 describe("DashboardShell", () => {
   it("logs in first and loads the venue only after an explicit action", async () => {
-    const fetchMock = vi.fn();
-    fetchMock
-      .mockResolvedValueOnce(createResponse(dashboardFixture.viewer))
-      .mockResolvedValueOnce(createResponse(dashboardFixture));
+    const fetchMock = createFetchMock(
+      createResponse(dashboardFixture.viewer),
+      createResponse(dashboardFixture)
+    );
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -109,7 +131,7 @@ describe("DashboardShell", () => {
 
     expect(await screen.findByRole("button", { name: /^logout$/i })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /load venue/i })).toBeEnabled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(appFetchCalls(fetchMock)).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: /load venue/i }));
 
@@ -122,7 +144,7 @@ describe("DashboardShell", () => {
     expect(screen.queryByText("Loaded 1 papers for this SAC batch.")).not.toBeInTheDocument();
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(appFetchCalls(fetchMock)).toHaveLength(2);
     });
     await waitFor(() => {
       expect(JSON.parse(window.localStorage.getItem("arr-sac-dashboard.recent-venues") || "[]")).toEqual([
@@ -136,7 +158,7 @@ describe("DashboardShell", () => {
       "arr-sac-dashboard.recent-venues",
       JSON.stringify(["aclweb.org/ACL/2026/Conference", "aclweb.org/ACL/ARR/2026/March"])
     );
-    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("fetch", createFetchMock());
 
     render(createElement(DashboardShell));
     const user = userEvent.setup();
@@ -153,7 +175,7 @@ describe("DashboardShell", () => {
       "arr-sac-dashboard.recent-venues",
       JSON.stringify(["aclweb.org/ACL/2026/Conference", "aclweb.org/ACL/ARR/2026/March"])
     );
-    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("fetch", createFetchMock());
 
     render(createElement(DashboardShell));
     const user = userEvent.setup();
@@ -167,7 +189,7 @@ describe("DashboardShell", () => {
   });
 
   it("classifies non-ARR venue IDs as commitment stage while typing", async () => {
-    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("fetch", createFetchMock());
 
     render(createElement(DashboardShell));
 
@@ -180,10 +202,10 @@ describe("DashboardShell", () => {
   });
 
   it("omits the AC Dashboard tab for commitment stage dashboards", async () => {
-    const fetchMock = vi.fn();
-    fetchMock
-      .mockResolvedValueOnce(createResponse(commitmentDashboardFixture.viewer))
-      .mockResolvedValueOnce(createResponse(commitmentDashboardFixture));
+    const fetchMock = createFetchMock(
+      createResponse(commitmentDashboardFixture.viewer),
+      createResponse(commitmentDashboardFixture)
+    );
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -201,5 +223,20 @@ describe("DashboardShell", () => {
     expect(await screen.findByRole("tab", { name: "Papers" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "AC Dashboard" })).not.toBeInTheDocument();
     expect(screen.getByText("Commitment Stage")).toBeInTheDocument();
+  });
+
+  it("shows an update notice when GitHub has a newer version", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === GITHUB_PACKAGE_URL) {
+        return createResponse({ version: "99.0.0" });
+      }
+
+      throw new Error(`Unexpected fetch call: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(createElement(DashboardShell));
+
+    expect(await screen.findByRole("link", { name: /update available/i })).toBeInTheDocument();
   });
 });
