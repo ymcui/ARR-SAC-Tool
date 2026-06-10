@@ -223,6 +223,42 @@ def test_gateway_bulk_fetches_assignment_groups_after_filtering_submissions() ->
     assert any(phase[0] == "groups" and phase[3] == 3 for phase in phases)
 
 
+def test_gateway_keeps_public_readable_submission_when_viewer_has_sac_group() -> None:
+    class PublicReaderClient(FakeClient):
+        def get_all_groups(self, prefix: str, members: str | None = None):
+            groups = super().get_all_groups(prefix=prefix, members=members)
+            if members is None:
+                return groups
+            return [
+                *groups,
+                SimpleNamespace(id="aclweb.org/ACL/ARR/2026/March/Submission101/Senior_Area_Chairs"),
+            ]
+
+        def get_all_notes(self, invitation: str, details: str):
+            return [
+                *super().get_all_notes(invitation=invitation, details=details),
+                SimpleNamespace(
+                    number=101,
+                    id="paper-101",
+                    readers=["everyone"],
+                    content={"venue": {"value": "ARR"}, "paper_type": {"value": "Long"}},
+                    details={"replies": []},
+                ),
+            ]
+
+    snapshot = OpenReviewGateway().fetch_dashboard_snapshot(
+        PublicReaderClient(),
+        "aclweb.org/ACL/ARR/2026/March",
+    )
+
+    assert [submission["number"] for submission in snapshot["submissions"]] == [42, 77, 101]
+    public_submission = snapshot["submissions"][2]
+    assert public_submission["readers"] == ["everyone"]
+    assert public_submission["sac_group"] == (
+        "aclweb.org/ACL/ARR/2026/March/Submission101/Senior_Area_Chairs"
+    )
+
+
 def test_gateway_falls_back_to_single_group_lookup_when_bulk_group_is_missing() -> None:
     class MissingBulkGroupClient(FakeClient):
         def get_all_groups(self, prefix: str, members: str | None = None):

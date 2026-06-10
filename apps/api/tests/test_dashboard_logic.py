@@ -120,6 +120,32 @@ def test_commitment_stage_venue_level_area_chair_reader_is_in_scope() -> None:
     assert response.papers[0].preprint is True
 
 
+def test_assignment_group_scope_keeps_public_readable_arr_submission() -> None:
+    snapshot = {
+        "viewer": {"id": "~Test_SAC1", "fullname": "Test SAC"},
+        "submission_name": "Submission",
+        "my_sac_groups": ["aclweb.org/ACL/ARR/2026/March/Submission493/Senior_Area_Chairs"],
+        "submissions": [
+            {
+                "number": 493,
+                "id": "paper-493",
+                "prefix": "aclweb.org/ACL/ARR/2026/March/Submission493",
+                "sac_group": "aclweb.org/ACL/ARR/2026/March/Submission493/Senior_Area_Chairs",
+                "readers": ["everyone"],
+                "content": {"venue": {"value": "ARR"}},
+                "replies": [],
+                "area_chairs": ["~Area_Chair1"],
+                "reviewers": [],
+            }
+        ],
+    }
+
+    response = build_dashboard_response(snapshot, "aclweb.org/ACL/ARR/2026/March")
+
+    assert response.summary.totalPapers == 1
+    assert response.papers[0].paperNumber == 493
+
+
 def test_resubmission_requires_previous_url_field() -> None:
     snapshot = {
         "viewer": {"id": "~Test_SAC1", "fullname": "Test SAC"},

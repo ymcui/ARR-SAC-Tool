@@ -170,7 +170,15 @@ def _count_comments(items: List[CommentRecord]) -> int:
 
 
 def _belongs_to_sac_batch(submission: Dict[str, Any], my_sac_groups: set[str]) -> bool:
-    return bool(set(submission.get("readers", [])) & my_sac_groups)
+    if set(submission.get("readers", [])) & my_sac_groups:
+        return True
+
+    sac_group = str(submission.get("sac_group") or "")
+    if sac_group and sac_group in my_sac_groups:
+        return True
+
+    prefix = str(submission.get("prefix") or "")
+    return bool(prefix and f"{prefix}/Senior_Area_Chairs" in my_sac_groups)
 
 
 def _is_withdrawn(submission: Dict[str, Any]) -> bool:

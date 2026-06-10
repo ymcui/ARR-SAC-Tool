@@ -469,11 +469,13 @@ class OpenReviewGateway:
 
         def make_submission_candidate(submission: Any, readers: List[str], content: Dict[str, Any]) -> Dict[str, Any]:
             prefix = f"{venue_id}/{submission_name}{submission.number}"
+            sac_group = f"{prefix}/Senior_Area_Chairs"
             replies = ((getattr(submission, "details", {}) or {}).get("replies", []) or [])
             return {
                 "number": int(submission.number),
                 "id": submission.id,
                 "prefix": prefix,
+                "sac_group": sac_group,
                 "readers": readers,
                 "content": content,
                 "replies": [_note_to_dict(reply) for reply in replies],
@@ -492,11 +494,11 @@ class OpenReviewGateway:
 
             content = getattr(submission, "content", {}) or {}
             readers = list(getattr(submission, "readers", []) or [])
-            if not (set(readers) & my_sac_groups):
+            candidate = make_submission_candidate(submission, readers, content)
+            if candidate["sac_group"] not in my_sac_groups and not (set(readers) & my_sac_groups):
                 skipped_out_of_scope += 1
                 continue
 
-            candidate = make_submission_candidate(submission, readers, content)
             if _is_withdrawn(content):
                 skipped_withdrawn += 1
                 collected_replies += int(candidate["reply_count"])
@@ -637,6 +639,8 @@ class OpenReviewGateway:
                 {
                     "number": submission["number"],
                     "id": submission["id"],
+                    "prefix": submission["prefix"],
+                    "sac_group": submission["sac_group"],
                     "readers": submission["readers"],
                     "content": submission["content"],
                     "replies": submission["replies"],
@@ -660,6 +664,8 @@ class OpenReviewGateway:
                 {
                     "number": submission["number"],
                     "id": submission["id"],
+                    "prefix": submission["prefix"],
+                    "sac_group": submission["sac_group"],
                     "readers": submission["readers"],
                     "content": submission["content"],
                     "replies": submission["replies"],
