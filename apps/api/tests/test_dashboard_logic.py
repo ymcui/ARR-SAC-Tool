@@ -26,6 +26,7 @@ def test_build_dashboard_response_matches_notebook_rules() -> None:
     assert response.summary.readyPapers == 1
     assert response.summary.metaReviewsDone == 2
     assert response.summary.commentsCount == 5
+    assert response.summary.alertsCount == 2
     assert len(response.withdrawnPapers) == 1
     assert response.withdrawnPapers[0].paperNumber == 44
     assert response.withdrawnPapers[0].paperTitle == "Withdrawn Work on Robust Review Signals"
@@ -61,6 +62,16 @@ def test_build_dashboard_response_matches_notebook_rules() -> None:
     assert response.comments[0].paperTitle == "A Careful Study of Reviewer Discussion Dynamics"
     issue_comment = next(item for item in response.comments[0].items if item.noteId == "comment-root")
     assert issue_comment.children[0].noteId == "comment-reply"
+    assert all(item.noteId != "delay-alert-reply" for item in response.comments[0].items)
+
+    assert [group.paperNumber for group in response.alerts] == [42]
+    assert response.alerts[0].paperTitle == "A Careful Study of Reviewer Discussion Dynamics"
+    assert response.alerts[0].items[0].noteId == "delay-alert"
+    assert response.alerts[0].items[0].type == "Delay Notification"
+    assert response.alerts[0].items[0].signerLabel == "Reviewer REii"
+    assert "Notification" in response.alerts[0].items[0].content
+    assert response.alerts[0].items[0].children[0].noteId == "delay-alert-reply"
+    assert response.alerts[0].items[0].children[0].type == "Official Comment"
 
     assert [record.areaChair for record in response.areaChairs] == ["~Area_Chair1", "~Area_Chair2"]
     assert response.areaChairs[0].areaChairName == "Area Chair One"
@@ -213,3 +224,98 @@ def test_empty_comments_produce_empty_comment_groups() -> None:
 
     assert response.comments == []
     assert response.summary.commentsCount == 0
+
+
+def test_standalone_official_comments_do_not_enter_comments_tab() -> None:
+    snapshot = {
+        "viewer": {"id": "~Test_SAC1", "fullname": "Test SAC"},
+        "submission_name": "Submission",
+        "my_sac_groups": ["aclweb.org/ACL/ARR/2026/March/Submission1/Senior_Area_Chairs"],
+        "submissions": [
+            {
+                "number": 1,
+                "id": "paper-1",
+                "readers": ["aclweb.org/ACL/ARR/2026/March/Submission1/Senior_Area_Chairs"],
+                "content": {"title": {"value": "Official Comment Scope"}, "venue": {"value": "ARR"}},
+                "replies": [
+                    {
+                        "id": "standalone-official-comment",
+                        "forum": "paper-1",
+                        "tcdate": 1783072800000,
+                        "invitations": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission1/-/Official_Comment"
+                        ],
+                        "signatures": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission1/Senior_Area_Chairs"
+                        ],
+                        "content": {"comment": {"value": "SAC standalone official comment."}},
+                    }
+                ],
+                "area_chairs": ["~Area_Chair1"],
+                "reviewers": [],
+            }
+        ],
+    }
+
+    response = build_dashboard_response(snapshot, "aclweb.org/ACL/ARR/2026/March")
+
+    assert response.comments == []
+    assert response.summary.commentsCount == 0
+
+
+def test_alert_matching_is_exact_and_arr_only() -> None:
+    snapshot = {
+        "viewer": {"id": "~Test_SAC1", "fullname": "Test SAC"},
+        "submission_name": "Submission",
+        "my_sac_groups": ["aclweb.org/ACL/ARR/2026/March/Submission1/Senior_Area_Chairs"],
+        "submissions": [
+            {
+                "number": 1,
+                "id": "paper-1",
+                "readers": ["aclweb.org/ACL/ARR/2026/March/Submission1/Senior_Area_Chairs"],
+                "content": {"title": {"value": "Alert Exactness"}, "venue": {"value": "ARR"}},
+                "replies": [
+                    {
+                        "id": "emergency-alert",
+                        "forum": "paper-1",
+                        "tcdate": 1783072800000,
+                        "invitations": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission1/-/Emergency_Declaration"
+                        ],
+                        "signatures": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission1/Reviewer_F6TN"
+                        ],
+                        "content": {
+                            "Declaration": {"value": "Medical"},
+                            "Explanation": {"value": "I need an emergency reviewer replacement."},
+                        },
+                    },
+                    {
+                        "id": "urgent-near-miss",
+                        "forum": "paper-1",
+                        "tcdate": 1783076400000,
+                        "invitations": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission1/-/Emergency_Declaration_Update"
+                        ],
+                        "signatures": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission1/Reviewer_F6TN"
+                        ],
+                        "content": {"Explanation": {"value": "This should not be treated as an alert."}},
+                    },
+                ],
+                "area_chairs": ["~Area_Chair1"],
+                "reviewers": [],
+            }
+        ],
+    }
+
+    arr_response = build_dashboard_response(snapshot, "aclweb.org/ACL/ARR/2026/March")
+    commitment_response = build_dashboard_response(snapshot, "aclweb.org/ACL/2026/Conference")
+
+    assert arr_response.summary.alertsCount == 1
+    assert arr_response.alerts[0].items[0].noteId == "emergency-alert"
+    assert arr_response.alerts[0].items[0].type == "Emergency Declaration"
+    assert "Declaration" in arr_response.alerts[0].items[0].content
+    assert "Explanation" in arr_response.alerts[0].items[0].content
+    assert commitment_response.summary.alertsCount == 0
+    assert commitment_response.alerts == []

@@ -56,19 +56,19 @@ export function VersionUpdateNotice() {
 
   return (
     <a
-      aria-label={`Update available: local version ${LOCAL_APP_VERSION}, latest version ${latestVersion}`}
+      aria-label={`Update available: local version v${LOCAL_APP_VERSION}, latest version v${latestVersion}`}
       className="status-chip update-available"
       href={GITHUB_REPOSITORY_URL}
       rel="noreferrer"
       target="_blank"
-      title={`Local ${LOCAL_APP_VERSION}; latest ${latestVersion}`}
+      title={`Local v${LOCAL_APP_VERSION}; latest v${latestVersion}`}
     >
       <svg aria-hidden="true" className="update-icon" viewBox="0 0 24 24">
         <path d="M12 5v11" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
         <path d="m7 10 5-5 5 5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
         <path d="M5 19h14" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
       </svg>
-      Update available
+      Update available: v{latestVersion}
     </a>
   );
 }

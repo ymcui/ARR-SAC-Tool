@@ -1,0 +1,78 @@
+# Changelog
+
+All notable user-facing changes are documented here.
+
+## [2.2.0] - 2026-07-03
+
+### Added
+
+- Added an ARR-only Alerts tab for review-chasing emergencies, including reviewer delay notifications and emergency declarations.
+- Added an Alerts table with paper number, area chair, paper type, review completion, emergency count, delay count, and overall score.
+- Added expandable alert rows with structured alert text, official follow-up comments, and OpenReview links.
+- Added alert totals in the Alerts header and dashboard API summary.
+- Added a small footer with the GitHub repository link and local app version.
+- Added the latest version number to the update-available badge.
+
+### Changed
+
+- Kept alert threads separate from the normal Comments tab so delay and emergency notices do not create duplicate or orphaned comment entries.
+- Kept standalone official SAC comments out of the normal Comments tab.
+- Bumped the dashboard cache version for the new API response shape.
+
+## [2.1.4] - 2026-06-10
+
+### Fixed
+
+- Fixed ARR scoping for public-readable submissions whose OpenReview readers include `everyone`.
+- Added per-submission SAC group metadata to keep assigned ARR papers in scope even when readers alone are not sufficient.
+- Added regression tests for public-readable ARR submission scope handling.
+
+## [2.1.3] - 2026-05-16
+
+### Added
+
+- Added an update-available indicator that checks the latest GitHub `package.json` version.
+- Added frontend version helpers for local version display and GitHub repository links.
+
+## [2.1.2] - 2026-05-15
+
+### Added
+
+- Added a production `npm run start` flow for running the API and web app together.
+- Added configurable web/API hosts and ports for local, remote, and notebook-style deployments.
+- Added support for using a system Python interpreter instead of the local virtual environment.
+- Added Colab-oriented setup documentation.
+
+### Changed
+
+- Routed frontend API calls through the web app proxy instead of directly targeting the backend port from the browser.
+- Expanded README setup, venue, usage, privacy, and feedback documentation.
+
+## [2.1.1] - 2026-05-13
+
+### Added
+
+- Added area chair display names and email addresses to the dashboard data.
+- Added AC Dashboard controls to copy all area chair emails or a single area chair email.
+- Added a missing meta-review summary badge to the AC Dashboard.
+- Added comment type badges and per-paper comment type breakdowns.
+
+### Changed
+
+- Simplified the Comments tab filters to search and type.
+- Improved Comments and AC Dashboard header layouts.
+- Showed missing meta-reviews with the same boolean-icon treatment used elsewhere in tables.
+
+## [2.1.0] - 2026-05-08
+
+### Added
+
+- Added commitment-stage support alongside ARR-stage dashboard use.
+- Added commitment-stage XLSX export support for offline SAC ranking.
+- Added recent venue reuse and clearer stage-specific README guidance.
+- Added the project license.
+
+### Changed
+
+- Compacted commitment-stage XLSX column sizing for easier offline review.
+- Removed the bundled notebook from the main branch and ignored notebook files going forward.

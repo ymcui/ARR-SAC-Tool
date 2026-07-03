@@ -17,6 +17,7 @@ export type SummaryInfo = {
   readyPapers: number;
   metaReviewsDone: number;
   commentsCount: number;
+  alertsCount: number;
 };
 
 export type ScoreSummary = {
@@ -93,6 +94,27 @@ export type CommentGroup = {
   items: CommentRecord[];
 };
 
+export type AlertRecord = {
+  noteId: string;
+  paperNumber: number;
+  paperId: string;
+  type: string;
+  role: string;
+  signerLabel?: string;
+  date: string;
+  content: string;
+  link: string;
+  children: AlertRecord[];
+};
+
+export type AlertGroup = {
+  paperNumber: number;
+  paperId: string;
+  paperTitle: string;
+  forumUrl: string;
+  items: AlertRecord[];
+};
+
 export type HistogramPoint = {
   label: string;
   center: number;
@@ -136,7 +158,8 @@ export type DashboardResponse = {
   areaChairs: AreaChairRecord[];
   withdrawnPapers: WithdrawnPaperRecord[];
   comments: CommentGroup[];
+  alerts: AlertGroup[];
   analytics: AnalyticsInfo;
 };
 
-export type TabKey = "papers" | "ac" | "comments" | "analytics";
+export type TabKey = "papers" | "ac" | "alerts" | "comments" | "analytics";

@@ -27,6 +27,7 @@ class SummaryInfo(BaseModel):
     readyPapers: int
     metaReviewsDone: int
     commentsCount: int
+    alertsCount: int = 0
 
 
 class ScoreSummary(BaseModel):
@@ -103,6 +104,27 @@ class CommentGroup(BaseModel):
     items: List[CommentRecord] = Field(default_factory=list)
 
 
+class AlertRecord(BaseModel):
+    noteId: str
+    paperNumber: int
+    paperId: str
+    type: str
+    role: str
+    signerLabel: str = ""
+    date: str
+    content: str
+    link: str
+    children: List["AlertRecord"] = Field(default_factory=list)
+
+
+class AlertGroup(BaseModel):
+    paperNumber: int
+    paperId: str
+    paperTitle: str = ""
+    forumUrl: str
+    items: List[AlertRecord] = Field(default_factory=list)
+
+
 class HistogramPoint(BaseModel):
     label: str
     center: float
@@ -146,10 +168,13 @@ class DashboardResponse(BaseModel):
     areaChairs: List[AreaChairRecord] = Field(default_factory=list)
     withdrawnPapers: List[WithdrawnPaperRecord] = Field(default_factory=list)
     comments: List[CommentGroup] = Field(default_factory=list)
+    alerts: List[AlertGroup] = Field(default_factory=list)
     analytics: AnalyticsInfo = Field(default_factory=AnalyticsInfo)
 
 
 if hasattr(CommentRecord, "model_rebuild"):
     CommentRecord.model_rebuild()
+    AlertRecord.model_rebuild()
 else:
     CommentRecord.update_forward_refs()
+    AlertRecord.update_forward_refs()

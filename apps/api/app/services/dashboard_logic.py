@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from app.schemas import (
+    AlertGroup,
+    AlertRecord,
     AnalyticsInfo,
     AreaChairRecord,
     CommentGroup,
@@ -26,6 +28,14 @@ from app.schemas import (
 OPENREVIEW_FORUM_URL = "https://openreview.net/forum?id={paper_id}"
 OPENREVIEW_NOTE_URL = "https://openreview.net/forum?id={forum_id}&noteId={note_id}"
 ARR_STAGE_PREFIX = "aclweb.org/ACL/ARR"
+ALERT_INVITATION_TYPES = {
+    "/-/Delay_Notification": "Delay Notification",
+    "/-/Emergency_Declaration": "Emergency Declaration",
+}
+ALERT_TYPE_PRIORITY = {
+    "Emergency Declaration": 0,
+    "Delay Notification": 1,
+}
 ProgressCallback = Callable[[str, str, int, int], None]
 logger = logging.getLogger(__name__)
 
@@ -48,10 +58,12 @@ def build_dashboard_response(
     submissions = snapshot.get("submissions", [])
     withdrawn_submissions = snapshot.get("withdrawn_submissions", [])
     area_chair_contacts = snapshot.get("area_chair_contacts", {})
+    should_collect_alerts = _venue_stage(venue_id) == "ARR Stage"
 
     papers: List[PaperRecord] = []
     withdrawn_papers: List[WithdrawnPaperRecord] = []
     comment_entries: List[Dict[str, Any]] = []
+    alert_entries: List[Dict[str, Any]] = []
     scanned_replies = 0
 
     if progress_callback:
@@ -78,7 +90,10 @@ def build_dashboard_response(
         paper = _build_paper_record(submission, area_chairs[0])
         papers.append(paper)
         scanned_replies += len(submission.get("replies", []) or [])
-        comment_entries.extend(_collect_comment_entries(submission))
+        alert_thread_note_ids = _collect_alert_thread_note_ids(submission) if should_collect_alerts else set()
+        if should_collect_alerts:
+            alert_entries.extend(_collect_alert_entries(submission, alert_thread_note_ids))
+        comment_entries.extend(_collect_comment_entries(submission, excluded_note_ids=alert_thread_note_ids))
 
     for submission in withdrawn_submissions:
         if not _belongs_to_sac_batch(submission, my_sac_groups):
@@ -105,16 +120,23 @@ def build_dashboard_response(
     assemble_started_at = time.perf_counter()
     papers.sort(key=lambda item: item.paperNumber)
     comment_groups = _build_comment_groups(comment_entries)
+    alert_groups = _build_alert_groups(alert_entries)
     area_chair_records = _build_area_chair_records(papers, area_chair_contacts)
     analytics = _build_analytics(papers)
     comment_count = sum(_count_comments(group.items) for group in comment_groups)
+    alert_count = sum(_count_alerts(group.items) for group in alert_groups)
     logger.warning(
-        "Dashboard build phase assemble_views completed in %.2fs for %s: ac_records=%s comment_groups=%s comments=%s",
+        (
+            "Dashboard build phase assemble_views completed in %.2fs for %s: "
+            "ac_records=%s comment_groups=%s comments=%s alert_groups=%s alerts=%s"
+        ),
         time.perf_counter() - assemble_started_at,
         viewer.id,
         len(area_chair_records),
         len(comment_groups),
         comment_count,
+        len(alert_groups),
+        alert_count,
     )
 
     if progress_callback:
@@ -133,17 +155,19 @@ def build_dashboard_response(
             readyPapers=sum(1 for paper in papers if paper.readyForRebuttal),
             metaReviewsDone=sum(1 for paper in papers if paper.metaReviewScore is not None),
             commentsCount=comment_count,
+            alertsCount=alert_count,
         ),
         papers=papers,
         areaChairs=area_chair_records,
         withdrawnPapers=withdrawn_papers,
         comments=comment_groups,
+        alerts=alert_groups,
         analytics=analytics,
     )
     logger.warning(
         (
             "Dashboard response build completed in %.2fs for %s: "
-            "papers=%s area_chairs=%s withdrawn_papers=%s comment_groups=%s comments=%s"
+            "papers=%s area_chairs=%s withdrawn_papers=%s comment_groups=%s comments=%s alert_groups=%s alerts=%s"
         ),
         time.perf_counter() - build_started_at,
         viewer.id,
@@ -152,6 +176,8 @@ def build_dashboard_response(
         len(withdrawn_papers),
         len(comment_groups),
         comment_count,
+        len(alert_groups),
+        alert_count,
     )
     return response
 
@@ -166,6 +192,13 @@ def _count_comments(items: List[CommentRecord]) -> int:
     total = 0
     for item in items:
         total += 1 + _count_comments(item.children)
+    return total
+
+
+def _count_alerts(items: List[AlertRecord]) -> int:
+    total = 0
+    for item in items:
+        total += 1 + _count_alerts(item.children)
     return total
 
 
@@ -364,18 +397,24 @@ def _build_area_chair_records(
     return results
 
 
-def _collect_comment_entries(submission: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _collect_comment_entries(
+    submission: Dict[str, Any],
+    excluded_note_ids: set[str] | None = None,
+) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
+    excluded_note_ids = excluded_note_ids or set()
     paper_number = int(submission.get("number"))
     paper_id = str(submission.get("id"))
     paper_title = _paper_title(submission.get("content", {}), paper_number)
 
     for reply in submission.get("replies", []) or []:
+        note_id = str(reply.get("id", ""))
+        if note_id in excluded_note_ids:
+            continue
         if not _is_relevant_comment(reply):
             continue
 
         forum_id = str(reply.get("forum") or paper_id)
-        note_id = str(reply.get("id", ""))
         timestamp_ms = int(reply.get("tcdate") or 0)
 
         entries.append(
@@ -392,6 +431,81 @@ def _collect_comment_entries(submission: Dict[str, Any]) -> List[Dict[str, Any]]
                 "replyTo": reply.get("replyto"),
                 "link": OPENREVIEW_NOTE_URL.format(forum_id=forum_id, note_id=note_id),
                 "timestampMs": timestamp_ms,
+            }
+        )
+
+    return entries
+
+
+def _collect_alert_thread_note_ids(submission: Dict[str, Any]) -> set[str]:
+    replies = submission.get("replies", []) or []
+    child_ids_by_parent_id: Dict[str, List[str]] = defaultdict(list)
+    root_ids: set[str] = set()
+
+    for reply in replies:
+        note_id = str(reply.get("id", ""))
+        if not note_id:
+            continue
+
+        parent_id = str(reply.get("replyto") or "")
+        if parent_id:
+            child_ids_by_parent_id[parent_id].append(note_id)
+
+        if _is_alert_root(reply):
+            root_ids.add(note_id)
+
+    thread_note_ids: set[str] = set()
+    pending_note_ids = list(root_ids)
+    while pending_note_ids:
+        note_id = pending_note_ids.pop()
+        if note_id in thread_note_ids:
+            continue
+        thread_note_ids.add(note_id)
+        pending_note_ids.extend(child_ids_by_parent_id.get(note_id, []))
+
+    return thread_note_ids
+
+
+def _collect_alert_entries(
+    submission: Dict[str, Any],
+    alert_thread_note_ids: set[str],
+) -> List[Dict[str, Any]]:
+    if not alert_thread_note_ids:
+        return []
+
+    entries: List[Dict[str, Any]] = []
+    paper_number = int(submission.get("number"))
+    paper_id = str(submission.get("id"))
+    paper_title = _paper_title(submission.get("content", {}), paper_number)
+
+    for reply in submission.get("replies", []) or []:
+        note_id = str(reply.get("id", ""))
+        if note_id not in alert_thread_note_ids:
+            continue
+        is_alert_root = _is_alert_root(reply)
+        if not is_alert_root and not _is_official_comment(reply):
+            continue
+
+        forum_id = str(reply.get("forum") or paper_id)
+        timestamp_ms = int(reply.get("tcdate") or 0)
+        signatures = reply.get("signatures", [])
+
+        entries.append(
+            {
+                "noteId": note_id,
+                "paperNumber": paper_number,
+                "paperId": paper_id,
+                "paperTitle": paper_title,
+                "forumUrl": OPENREVIEW_FORUM_URL.format(paper_id=paper_id),
+                "type": _classify_alert_type(reply) if is_alert_root else _classify_comment_type(reply),
+                "role": _infer_role(signatures),
+                "signerLabel": _signature_display_label(signatures),
+                "date": _format_timestamp(timestamp_ms),
+                "content": _extract_alert_text(reply) if is_alert_root else _extract_comment_text(reply),
+                "replyTo": reply.get("replyto"),
+                "link": OPENREVIEW_NOTE_URL.format(forum_id=forum_id, note_id=note_id),
+                "timestampMs": timestamp_ms,
+                "isAlertRoot": is_alert_root,
             }
         )
 
@@ -444,6 +558,76 @@ def _build_comment_groups(entries: List[Dict[str, Any]]) -> List[CommentGroup]:
         )
 
     return comment_groups
+
+
+def _build_alert_groups(entries: List[Dict[str, Any]]) -> List[AlertGroup]:
+    if not entries:
+        return []
+
+    grouped_entries: Dict[tuple[int, str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for entry in entries:
+        key = (entry["paperNumber"], entry["paperId"], entry["paperTitle"], entry["forumUrl"])
+        grouped_entries[key].append(entry)
+
+    sortable_groups: List[tuple[int, int, AlertGroup]] = []
+    for (paper_number, paper_id, paper_title, forum_url), group_entries in grouped_entries.items():
+        ordered_entries = sorted(group_entries, key=lambda item: (item["timestampMs"], item["noteId"]))
+        nodes = {
+            entry["noteId"]: AlertRecord(
+                noteId=entry["noteId"],
+                paperNumber=entry["paperNumber"],
+                paperId=entry["paperId"],
+                type=entry["type"],
+                role=entry["role"],
+                signerLabel=entry["signerLabel"],
+                date=entry["date"],
+                content=entry["content"],
+                link=entry["link"],
+            )
+            for entry in ordered_entries
+        }
+        entries_by_note_id = {entry["noteId"]: entry for entry in ordered_entries}
+
+        roots: List[AlertRecord] = []
+        for entry in ordered_entries:
+            node = nodes[entry["noteId"]]
+            parent_id = entry.get("replyTo")
+            if parent_id and parent_id in nodes:
+                nodes[parent_id].children.append(node)
+            else:
+                roots.append(node)
+
+        roots.sort(
+            key=lambda node: (
+                ALERT_TYPE_PRIORITY.get(node.type, 99),
+                -int(entries_by_note_id[node.noteId]["timestampMs"]),
+                node.noteId,
+            )
+        )
+        newest_alert_timestamp = max(
+            (
+                int(entry["timestampMs"])
+                for entry in group_entries
+                if entry.get("isAlertRoot")
+            ),
+            default=max(int(entry["timestampMs"]) for entry in group_entries),
+        )
+
+        sortable_groups.append(
+            (
+                -newest_alert_timestamp,
+                paper_number,
+                AlertGroup(
+                    paperNumber=paper_number,
+                    paperId=paper_id,
+                    paperTitle=paper_title,
+                    forumUrl=forum_url,
+                    items=roots,
+                ),
+            )
+        )
+
+    return [group for _, _, group in sorted(sortable_groups, key=lambda item: (item[0], item[1]))]
 
 
 def _build_analytics(papers: List[PaperRecord]) -> AnalyticsInfo:
@@ -654,6 +838,23 @@ def _is_issue_report(reply: Dict[str, Any]) -> bool:
     return any("/-/Review_Issue_Report" in invitation for invitation in reply.get("invitations", []))
 
 
+def _is_alert_root(reply: Dict[str, Any]) -> bool:
+    invitations = reply.get("invitations", [])
+    return any(
+        invitation.endswith(alert_suffix)
+        for invitation in invitations
+        for alert_suffix in ALERT_INVITATION_TYPES
+    )
+
+
+def _is_official_comment(reply: Dict[str, Any]) -> bool:
+    invitations = reply.get("invitations", [])
+    return any(
+        invitation.endswith("/-/Comment") or invitation.endswith("/-/Official_Comment")
+        for invitation in invitations
+    )
+
+
 def _extract_meta_review_text(reply: Dict[str, Any]) -> str:
     content = reply.get("content", {})
     structured_fields = [
@@ -692,9 +893,42 @@ def _classify_comment_type(reply: Dict[str, Any]) -> str:
         return "Review Issue"
     if any("/-/Author-Editor_Confidential_Comment" in invitation for invitation in invitations):
         return "Author-Editor Confidential"
+    if any("/-/Official_Comment" in invitation for invitation in invitations):
+        return "Official Comment"
     if any("/-/Comment" in invitation for invitation in invitations):
         return "Confidential Comment"
     return "Other"
+
+
+def _classify_alert_type(reply: Dict[str, Any]) -> str:
+    invitations = reply.get("invitations", [])
+    for suffix, label in ALERT_INVITATION_TYPES.items():
+        if any(invitation.endswith(suffix) for invitation in invitations):
+            return label
+    return "Alert"
+
+
+def _extract_alert_text(reply: Dict[str, Any]) -> str:
+    alert_type = _classify_alert_type(reply)
+    content = reply.get("content", {})
+
+    if alert_type == "Delay Notification":
+        notification = _first_content_text(content, ["notification", "Notification"])
+        if notification:
+            return f"**Notification:** {notification}"
+
+    if alert_type == "Emergency Declaration":
+        parts = []
+        declaration = _first_content_text(content, ["declaration", "Declaration"])
+        explanation = _first_content_text(content, ["explanation", "Explanation"])
+        if declaration:
+            parts.append(f"**Declaration:** {declaration}")
+        if explanation:
+            parts.append(f"**Explanation:**\n{explanation}")
+        if parts:
+            return "\n\n".join(parts)
+
+    return _extract_comment_text(reply)
 
 
 def _extract_comment_text(reply: Dict[str, Any]) -> str:
@@ -731,6 +965,25 @@ def _infer_role(signatures: List[str]) -> str:
     if signature.startswith("~"):
         return "User"
     return "Other"
+
+
+def _signature_display_label(signatures: List[str]) -> str:
+    if not signatures:
+        return ""
+
+    signature = str(signatures[0])
+    if signature.startswith("~"):
+        return _profile_id_to_display_name(signature)
+
+    label = signature.rstrip("/").split("/")[-1].replace("_", " ").strip()
+    return label or signature
+
+
+def _profile_id_to_display_name(profile_id: str) -> str:
+    normalized = profile_id.strip().lstrip("~")
+    while normalized and normalized[-1].isdigit():
+        normalized = normalized[:-1]
+    return normalized.replace("_", " ").strip() or profile_id
 
 
 def _format_timestamp(timestamp_ms: int) -> str:

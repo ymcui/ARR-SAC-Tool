@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import type { DashboardResponse } from "@/lib/types";
-import { GITHUB_PACKAGE_URL } from "@/lib/version";
+import { GITHUB_PACKAGE_URL, GITHUB_REPOSITORY_URL, LOCAL_APP_VERSION } from "@/lib/version";
 
 function createResponse(data: unknown, ok = true, status = 200): Response {
   return {
@@ -47,7 +47,8 @@ const dashboardFixture: DashboardResponse = {
     totalPapers: 1,
     readyPapers: 1,
     metaReviewsDone: 1,
-    commentsCount: 0
+    commentsCount: 0,
+    alertsCount: 1
   },
   papers: [
     {
@@ -92,6 +93,28 @@ const dashboardFixture: DashboardResponse = {
   ],
   withdrawnPapers: [],
   comments: [],
+  alerts: [
+    {
+      paperNumber: 42,
+      paperId: "paper42",
+      paperTitle: "A Careful Study of Reviewer Discussion Dynamics",
+      forumUrl: "https://openreview.net/forum?id=paper42",
+      items: [
+        {
+          noteId: "delay-alert",
+          paperNumber: 42,
+          paperId: "paper42",
+          type: "Delay Notification",
+          role: "Reviewer",
+          signerLabel: "Reviewer REii",
+          date: "2026-07-03",
+          content: "**Notification:** I need four more days.",
+          link: "https://openreview.net/forum?id=paper42&noteId=delay-alert",
+          children: []
+        }
+      ]
+    }
+  ],
   analytics: {
     overallAssessmentHistogram: [],
     metaReviewDistribution: [],
@@ -122,6 +145,11 @@ describe("DashboardShell", () => {
     render(createElement(DashboardShell));
 
     const user = userEvent.setup();
+    expect(screen.getByRole("link", { name: /open ymcui\/arr-sac-tool on github/i })).toHaveAttribute(
+      "href",
+      GITHUB_REPOSITORY_URL
+    );
+    expect(screen.getByText(`v${LOCAL_APP_VERSION}`)).toBeInTheDocument();
     expect(screen.getByLabelText("Venue ID")).toHaveValue("aclweb.org/ACL/ARR/2026/March");
     expect(screen.getByText("ARR Stage")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^login$/i }));
@@ -136,6 +164,7 @@ describe("DashboardShell", () => {
     await user.click(screen.getByRole("button", { name: /load venue/i }));
 
     expect(await screen.findByRole("tab", { name: "Papers" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Alerts" })).toBeInTheDocument();
     expect(await screen.findByText("Paper workspace")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "42" })).toBeInTheDocument();
     expect(screen.queryByText("paper42")).not.toBeInTheDocument();
@@ -222,6 +251,7 @@ describe("DashboardShell", () => {
 
     expect(await screen.findByRole("tab", { name: "Papers" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "AC Dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Alerts" })).not.toBeInTheDocument();
     expect(screen.getByText("Commitment Stage")).toBeInTheDocument();
   });
 
@@ -237,6 +267,11 @@ describe("DashboardShell", () => {
 
     render(createElement(DashboardShell));
 
-    expect(await screen.findByRole("link", { name: /update available/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("link", {
+        name: /update available: local version v.+latest version v99\.0\.0/i
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Update available: v99.0.0")).toBeInTheDocument();
   });
 });

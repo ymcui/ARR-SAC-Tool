@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, useTransition } from "react";
 
+import { AlertsPanel } from "@/components/alerts-panel";
 import { ACDashboardPanel } from "@/components/ac-dashboard-panel";
 import { CommentsPanel } from "@/components/comments-panel";
 import { LoginPanel } from "@/components/login-panel";
@@ -10,6 +11,7 @@ import { PapersPanel } from "@/components/papers-panel";
 import { Toolbar } from "@/components/toolbar";
 import { VenueWorkspacePanel } from "@/components/venue-workspace-panel";
 import type { DashboardLoadProgress, DashboardResponse, TabKey, VenueStage, ViewerInfo } from "@/lib/types";
+import { GITHUB_REPOSITORY_URL, LOCAL_APP_VERSION } from "@/lib/version";
 
 const AnalyticsPanel = dynamic(() => import("@/components/analytics-panel"), {
   ssr: false,
@@ -33,10 +35,11 @@ const MAX_RECENT_VENUES = 8;
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "papers", label: "Papers" },
   { key: "ac", label: "AC Dashboard" },
+  { key: "alerts", label: "Alerts" },
   { key: "comments", label: "Comments" },
   { key: "analytics", label: "Analytics" }
 ];
-const COMMITMENT_TABS = TABS.filter((tab) => tab.key !== "ac");
+const COMMITMENT_TABS = TABS.filter((tab) => tab.key !== "ac" && tab.key !== "alerts");
 
 async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
@@ -228,7 +231,9 @@ export function DashboardShell() {
         setViewer(payload.viewer);
         setVenueId(trimmedVenueId);
         setActiveTab((current) =>
-          payload.venue.stage === "Commitment Stage" && current === "ac" ? "papers" : current
+          payload.venue.stage === "Commitment Stage" && (current === "ac" || current === "alerts")
+            ? "papers"
+            : current
         );
       });
       setLoadProgress({
@@ -424,6 +429,13 @@ export function DashboardShell() {
                 {selectedTab === "ac" ? (
                   <ACDashboardPanel areaChairs={dashboard.areaChairs} papers={dashboard.papers} />
                 ) : null}
+                {selectedTab === "alerts" ? (
+                  <AlertsPanel
+                    alerts={dashboard.alerts}
+                    areaChairs={dashboard.areaChairs}
+                    papers={dashboard.papers}
+                  />
+                ) : null}
                 {selectedTab === "comments" ? <CommentsPanel comments={dashboard.comments} /> : null}
                 {selectedTab === "analytics" ? <AnalyticsPanel analytics={dashboard.analytics} /> : null}
               </div>
@@ -431,6 +443,25 @@ export function DashboardShell() {
           ) : null}
 
         </main>
+
+        <footer className="app-footer">
+          <a
+            aria-label="Open ymcui/ARR-SAC-Tool on GitHub"
+            className="github-badge"
+            href={GITHUB_REPOSITORY_URL}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <svg aria-hidden="true" className="github-badge-icon" viewBox="0 0 24 24">
+              <path
+                d="M12 .5A11.5 11.5 0 0 0 8.36 22.9c.58.1.79-.25.79-.56v-2c-3.22.7-3.9-1.38-3.9-1.38-.53-1.35-1.3-1.7-1.3-1.7-1.06-.72.08-.7.08-.7 1.17.08 1.79 1.2 1.79 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.41-1.27.74-1.56-2.57-.29-5.27-1.28-5.27-5.72 0-1.26.45-2.3 1.2-3.1-.12-.3-.52-1.48.11-3.07 0 0 .98-.31 3.18 1.18a10.96 10.96 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.64 1.59.24 2.77.12 3.07.75.8 1.2 1.84 1.2 3.1 0 4.45-2.71 5.42-5.29 5.71.42.36.8 1.08.8 2.18v3.24c0 .31.2.67.8.56A11.5 11.5 0 0 0 12 .5Z"
+                fill="currentColor"
+              />
+            </svg>
+            ymcui/ARR-SAC-Tool
+          </a>
+          <span className="footer-version">v{LOCAL_APP_VERSION}</span>
+        </footer>
 
         <LoginPanel
           error={authError}

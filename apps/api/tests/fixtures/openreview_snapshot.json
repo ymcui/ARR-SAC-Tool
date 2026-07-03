@@ -208,6 +208,39 @@
               "value": "Following up on the report."
             }
           }
+        },
+        {
+          "id": "delay-alert",
+          "forum": "paper42",
+          "tcdate": 1783069200000,
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Delay_Notification"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Reviewer_REii"
+          ],
+          "content": {
+            "notification": {
+              "value": "I need four more days to complete my assigned reviews."
+            }
+          }
+        },
+        {
+          "id": "delay-alert-reply",
+          "forum": "paper42",
+          "replyto": "delay-alert",
+          "tcdate": 1783072800000,
+          "invitations": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/-/Official_Comment"
+          ],
+          "signatures": [
+            "aclweb.org/ACL/ARR/2026/March/Submission42/Area_Chair_1"
+          ],
+          "content": {
+            "comment": {
+              "value": "Thanks for the notice; we are tracking this."
+            }
+          }
         }
       ],
       "area_chairs": [

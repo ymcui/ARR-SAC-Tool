@@ -10,6 +10,7 @@ SAC Monitor helps you load your assigned OpenReview venue, inspect paper status,
 > 1. **Use the latest code when available (an icon will show if there are updates) to get the latest features and bug fixes.**
 > 2. If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle.
 > 3. If you want to run the dashboard in a Colab notebook, please check the "[Running In Colab](#running-in-colab)" section below for instructions (will not be maintained). 
+> 4. For detailed changelog, please check [CHANGELOG.md](./CHANGELOG.md).
 
 ## Latest Supported Venues
 
@@ -108,6 +109,17 @@ Clicking on an AC will show the papers assigned to that AC and their review stat
     <img src="./assets/4-ac-dashboard-detail.png" width="800"/>
     <br>
 </p>
+
+### Page: Alerts (New)
+
+In `Alerts`, you can check critical alerts that need to draw SAC attention, such as `delay notifications`, `emergency declarations`, etc. This is helpful in late review chasing period, to see whether new reviewers are assigned to replace the missing reviewers.
+
+<p align="center">
+    <br>
+    <img src="./assets/8-alerts.png" width="800"/>
+    <br>
+</p>
+
 
 
 ### Page: Comments
