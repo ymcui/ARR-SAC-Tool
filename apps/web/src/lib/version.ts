@@ -3,6 +3,7 @@ import packageInfo from "../../../../package.json";
 export const LOCAL_APP_VERSION = packageInfo.version;
 export const GITHUB_PACKAGE_URL = "https://raw.githubusercontent.com/ymcui/ARR-SAC-Tool/main/package.json";
 export const GITHUB_REPOSITORY_URL = "https://github.com/ymcui/ARR-SAC-Tool";
+export const GITHUB_CHANGELOG_URL = "https://github.com/ymcui/ARR-SAC-Tool/blob/main/CHANGELOG.md";
 
 type ParsedVersion = {
   major: number;

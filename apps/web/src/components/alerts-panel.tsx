@@ -5,7 +5,9 @@ import { Fragment, useDeferredValue, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { formatCountPair, formatScore, joinClasses } from "@/lib/format";
+import { EmptyStateIcon } from "@/components/empty-state-icon";
+import { TableBooleanIcon } from "@/components/table-boolean-icon";
+import { formatCountPair, formatScoreSummary, joinClasses } from "@/lib/format";
 import type { AlertGroup, AlertRecord, AreaChairRecord, PaperRecord } from "@/lib/types";
 
 type AlertsPanelProps = {
@@ -209,15 +211,17 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
 
       {isEmptyDataset ? (
         <div className="empty-state">
-          <h3>No review alerts were found.</h3>
-          <p>This ARR batch has no delay notifications or emergency declarations in your SAC scope.</p>
+          <EmptyStateIcon />
+          <h3>No review alerts need attention.</h3>
+          <p>Delay notifications and emergency declarations will appear here when they are posted.</p>
         </div>
       ) : null}
 
       {!isEmptyDataset && filteredGroups.length === 0 ? (
         <div className="empty-state">
+          <EmptyStateIcon />
           <h3>No alerts match the current filters.</h3>
-          <p>Clear the search or relax the type filter to widen the view.</p>
+          <p>Try a broader search term or switch back to all alert types.</p>
         </div>
       ) : null}
 
@@ -230,6 +234,7 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
                 <th>Area Chair</th>
                 <th>Type</th>
                 <th>Reviews</th>
+                <th>Ready</th>
                 <th>Emergency</th>
                 <th>Delay</th>
                 <th>Overall</th>
@@ -248,7 +253,7 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
                   ? formatCountPair(paper.completedReviews, paper.expectedReviews)
                   : "Unknown";
                 const paperType = paper?.paperType || "Unspecified";
-                const overallScore = paper ? formatScore(paper.overallAssessment.average) : "Pending";
+                const overallScore = paper ? formatScoreSummary(paper.overallAssessment) : "N/A";
 
                 return (
                   <Fragment key={group.paperId}>
@@ -284,6 +289,9 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
                       <td>{paperType}</td>
                       <td>{reviewStatus}</td>
                       <td>
+                        <TableBooleanIcon label="Ready" value={paper?.readyForRebuttal ?? false} />
+                      </td>
+                      <td>
                         <span className="alert-count-badge emergency">{emergencyCount}</span>
                       </td>
                       <td>
@@ -294,7 +302,7 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
 
                     {expanded ? (
                       <tr className="detail-row" key={`${group.paperId}-detail`}>
-                        <td colSpan={7}>
+                        <td colSpan={8}>
                           <div className="collapsible-shell">
                             <div className="collapsible-inner">
                               <div className="detail-panel-content alert-detail-panel">

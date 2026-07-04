@@ -61,7 +61,7 @@ const commentsFixture: CommentGroup[] = [
 describe("CommentsPanel", () => {
   it("renders an empty state when there are no comments", () => {
     render(createElement(CommentsPanel, { comments: [] }));
-    expect(screen.getByText(/no relevant comments were found/i)).toBeInTheDocument();
+    expect(screen.getByText(/no comments need attention/i)).toBeInTheDocument();
   });
 
   it("collapses paper comment groups by default and shows post counts", async () => {

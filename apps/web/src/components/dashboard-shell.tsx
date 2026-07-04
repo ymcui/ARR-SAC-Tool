@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { AlertsPanel } from "@/components/alerts-panel";
 import { ACDashboardPanel } from "@/components/ac-dashboard-panel";
 import { CommentsPanel } from "@/components/comments-panel";
+import { EmptyStateIcon } from "@/components/empty-state-icon";
 import { LoginPanel } from "@/components/login-panel";
 import { PapersPanel } from "@/components/papers-panel";
 import { Toolbar } from "@/components/toolbar";
@@ -18,8 +19,9 @@ const AnalyticsPanel = dynamic(() => import("@/components/analytics-panel"), {
   loading: () => (
     <section className="panel">
       <div className="empty-state inset">
-        <h3>Loading analytics...</h3>
-        <p>The heavier chart layer is being loaded on demand.</p>
+        <EmptyStateIcon />
+        <h3>Preparing analytics...</h3>
+        <p>Charts will appear in a moment.</p>
       </div>
     </section>
   )
@@ -372,6 +374,9 @@ export function DashboardShell() {
   const visibleTabs = dashboard?.venue.stage === "Commitment Stage" ? COMMITMENT_TABS : TABS;
   const selectedTab = visibleTabs.some((tab) => tab.key === activeTab) ? activeTab : "papers";
   const venueStage = getVenueStage(venueId);
+  const shouldRefreshLoadedVenue = Boolean(
+    dashboard?.venue.venueId && dashboard.venue.venueId.trim() === venueId.trim()
+  );
 
   return (
     <div className="shell">
@@ -399,13 +404,20 @@ export function DashboardShell() {
               isBusy={isBusy}
               lastSyncedAt={dashboard?.venue.lastSyncedAt}
               loadProgress={loadProgress}
-              onLoad={() => void requestDashboard(venueId, false)}
-              onRefresh={() => void requestDashboard(venueId, true)}
+              onLoadOrRefresh={() => void requestDashboard(venueId, shouldRefreshLoadedVenue)}
               onVenueIdChange={(value) => {
                 setVenueId(value);
                 window.sessionStorage.setItem(VENUE_STORAGE_KEY, value);
               }}
               recentVenueIds={recentVenueIds}
+              stats={
+                dashboard
+                  ? {
+                      papers: dashboard.summary.totalPapers,
+                      areaChairs: dashboard.areaChairs.length
+                    }
+                  : undefined
+              }
               venueId={venueId}
               viewer={viewer}
             />
@@ -437,7 +449,9 @@ export function DashboardShell() {
                   />
                 ) : null}
                 {selectedTab === "comments" ? <CommentsPanel comments={dashboard.comments} /> : null}
-                {selectedTab === "analytics" ? <AnalyticsPanel analytics={dashboard.analytics} /> : null}
+                {selectedTab === "analytics" ? (
+                  <AnalyticsPanel analytics={dashboard.analytics} papers={dashboard.papers} />
+                ) : null}
               </div>
             </>
           ) : null}

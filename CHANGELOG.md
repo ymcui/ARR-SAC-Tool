@@ -2,6 +2,41 @@
 
 All notable user-facing changes are documented here.
 
+## [2.3.1] - 2026-07-04
+
+### Changed
+
+- Refined empty states across Comments, Alerts, Analytics, and lazy-loaded Analytics with softer layout and clearer wording.
+- Added a polished no-content illustration for empty states.
+- Rendered the no-content illustration as a real SVG image without blur filters so it stays crisp when scaled in the app.
+
+## [2.3.0] - 2026-07-04
+
+### Added
+
+- Added a Paper Stats panel before the existing Analytics section.
+- Added a paper type mix donut chart with Long, Short, and Other counts plus percentages.
+- Added a completed-reviews distribution chart to show how many papers have each review count.
+- Added percentage labels to review-count tooltips and the zero-review warning badge.
+
+### Changed
+
+- Refined the Paper Stats chart layout with a larger donut, side legend on wide screens, and responsive stacking on narrower screens.
+
+## [2.2.1] - 2026-07-04
+
+### Added
+
+- Added compact venue summary cards for paper count and AC count after a dashboard is loaded.
+- Added a Ready column to the Alerts table.
+
+### Changed
+
+- Combined the venue Load and Refresh controls into one Load / Refresh action.
+- Changed unavailable score wording from Pending to N/A and showed individual overall scores in the Alerts table.
+- Pointed the update-available badge directly to the changelog.
+- Refined footer placement and venue summary styling.
+
 ## [2.2.0] - 2026-07-03
 
 ### Added

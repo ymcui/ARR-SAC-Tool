@@ -9,12 +9,12 @@ export function formatCountPair(first: number, second: number): string {
 }
 
 export function formatScore(value: number | null | undefined): string {
-  return value == null ? "Pending" : value.toFixed(1);
+  return value == null ? "N/A" : value.toFixed(1);
 }
 
 export function formatScoreSummary(summary: ScoreSummary): string {
   if (summary.average == null || summary.values.length === 0) {
-    return "Pending";
+    return "N/A";
   }
 
   const values = summary.values.map((value) => value.toFixed(1)).join(" / ");
@@ -41,4 +41,3 @@ export function percent(part: number, whole: number): number {
 
   return Math.round((part / whole) * 100);
 }
-

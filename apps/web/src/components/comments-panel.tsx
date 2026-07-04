@@ -5,6 +5,7 @@ import { useDeferredValue, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { EmptyStateIcon } from "@/components/empty-state-icon";
 import type { CommentGroup, CommentRecord } from "@/lib/types";
 
 type CommentsPanelProps = {
@@ -168,15 +169,17 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
 
       {isEmptyDataset ? (
         <div className="empty-state">
-          <h3>No relevant comments were found.</h3>
-          <p>This view now stays stable even when a venue has zero confidential comments or issue reports.</p>
+          <EmptyStateIcon />
+          <h3>No comments need attention.</h3>
+          <p>Confidential comments and issue reports will appear here when they are available.</p>
         </div>
       ) : null}
 
       {!isEmptyDataset && filteredGroups.length === 0 ? (
         <div className="empty-state">
+          <EmptyStateIcon />
           <h3>No comments match the current filters.</h3>
-          <p>Clear the search or relax the type and role filters to widen the view.</p>
+          <p>Try a broader search term or switch back to all comment types.</p>
         </div>
       ) : null}
 

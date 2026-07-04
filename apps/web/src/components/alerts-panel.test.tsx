@@ -153,13 +153,15 @@ function renderAlertsPanel(alerts: AlertGroup[] = alertsFixture) {
 describe("AlertsPanel", () => {
   it("renders an empty state when there are no alerts", () => {
     renderAlertsPanel([]);
-    expect(screen.getByText(/no review alerts were found/i)).toBeInTheDocument();
+    expect(screen.getByText(/no review alerts need attention/i)).toBeInTheDocument();
   });
 
   it("renders a compact alert table and expands alert details", async () => {
     renderAlertsPanel();
     const user = userEvent.setup();
-    const row = screen.getByRole("row", { name: /42 ~area_chair1 long 2 \/ 3 1 1 3\.5/i });
+    const row = screen.getByRole("row", {
+      name: /42 ~area_chair1 long 2 \/ 3 ready: no 1 1 3\.5 \(3\.0 \/ 4\.0\)/i
+    });
     const summary = screen.getByLabelText("Alerts summary");
     const dataRows = screen.getAllByRole("row").slice(1);
 
@@ -173,8 +175,10 @@ describe("AlertsPanel", () => {
     expect(within(row).getByRole("button", { name: "42" })).toHaveAttribute("aria-expanded", "false");
     expect(within(row).getByText("Long")).toBeInTheDocument();
     expect(within(row).getByText("2 / 3")).toBeInTheDocument();
+    expect(within(row).getByRole("img", { name: "Ready: No" })).toBeInTheDocument();
+    expect(within(dataRows[1]).getByRole("img", { name: "Ready: Yes" })).toBeInTheDocument();
     expect(within(row).getByText("~Area_Chair1")).toBeInTheDocument();
-    expect(within(row).getByText("3.5")).toBeInTheDocument();
+    expect(within(row).getByText("3.5 (3.0 / 4.0)")).toBeInTheDocument();
     expect(screen.queryByText(/emergency replacement/i)).not.toBeInTheDocument();
 
     await user.click(row);
@@ -194,7 +198,9 @@ describe("AlertsPanel", () => {
     await user.selectOptions(screen.getByLabelText("Type"), "Delay Notification");
     expect(within(screen.getByLabelText("Alerts summary")).getByText("1")).toBeInTheDocument();
     expect(within(screen.getByLabelText("Alerts summary")).getByText("2")).toBeInTheDocument();
-    const row = screen.getByRole("row", { name: /42 ~area_chair1 long 2 \/ 3 0 1 3\.5/i });
+    const row = screen.getByRole("row", {
+      name: /42 ~area_chair1 long 2 \/ 3 ready: no 0 1 3\.5 \(3\.0 \/ 4\.0\)/i
+    });
 
     await user.click(row);
 

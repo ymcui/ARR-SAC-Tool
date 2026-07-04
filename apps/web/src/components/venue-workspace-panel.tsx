@@ -10,11 +10,14 @@ type VenueWorkspacePanelProps = {
   venueId: string;
   recentVenueIds?: string[];
   lastSyncedAt?: string;
+  stats?: {
+    papers: number;
+    areaChairs: number;
+  };
   loadProgress: DashboardLoadProgress | null;
   isBusy: boolean;
   onVenueIdChange: (value: string) => void;
-  onLoad: () => void;
-  onRefresh: () => void;
+  onLoadOrRefresh: () => void;
 };
 
 const RECENT_VENUES_LISTBOX_ID = "recent-venue-ids";
@@ -54,18 +57,18 @@ export function VenueWorkspacePanel({
   venueId,
   recentVenueIds = [],
   lastSyncedAt,
+  stats,
   loadProgress,
   isBusy,
   onVenueIdChange,
-  onLoad,
-  onRefresh
+  onLoadOrRefresh
 }: VenueWorkspacePanelProps) {
   const [isRecentOpen, setIsRecentOpen] = useState(false);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsRecentOpen(false);
-    onLoad();
+    onLoadOrRefresh();
   }
 
   const showLoadProgress = loadProgress && (!loadProgress.done || Boolean(loadProgress.error));
@@ -120,21 +123,26 @@ export function VenueWorkspacePanel({
 
         <div className="workspace-panel-actions">
           <button className="primary-button" disabled={!viewer || !venueId.trim() || isBusy} type="submit">
-            Load venue
-          </button>
-          <button
-            className="secondary-button"
-            disabled={!viewer || !venueId.trim() || isBusy}
-            onClick={onRefresh}
-            type="button"
-          >
-            Refresh
+            Load / Refresh
           </button>
           <span className={joinClasses("status-chip", viewer ? "positive" : "muted")}>
             {viewer ? `Logged in as ${viewer.fullname}` : "Login required"}
           </span>
           <span className="status-chip muted">{`Last sync: ${formatLastSync(lastSyncedAt)}`}</span>
         </div>
+
+        {stats ? (
+          <div aria-label="Venue summary" className="workspace-panel-stats">
+            <div className="workspace-stat-card">
+              <span>Paper #</span>
+              <strong>{stats.papers}</strong>
+            </div>
+            <div className="workspace-stat-card">
+              <span>AC #</span>
+              <strong>{stats.areaChairs}</strong>
+            </div>
+          </div>
+        ) : null}
       </form>
 
       {showLoadProgress ? (

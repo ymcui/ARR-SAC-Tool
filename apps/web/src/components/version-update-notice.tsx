@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 
 import {
+  GITHUB_CHANGELOG_URL,
   GITHUB_PACKAGE_URL,
-  GITHUB_REPOSITORY_URL,
   LOCAL_APP_VERSION,
   isVersionBehind
 } from "@/lib/version";
@@ -58,7 +58,7 @@ export function VersionUpdateNotice() {
     <a
       aria-label={`Update available: local version v${LOCAL_APP_VERSION}, latest version v${latestVersion}`}
       className="status-chip update-available"
-      href={GITHUB_REPOSITORY_URL}
+      href={GITHUB_CHANGELOG_URL}
       rel="noreferrer"
       target="_blank"
       title={`Local v${LOCAL_APP_VERSION}; latest v${latestVersion}`}

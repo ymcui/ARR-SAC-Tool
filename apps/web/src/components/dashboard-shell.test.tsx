@@ -1,10 +1,10 @@
 import { createElement } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import type { DashboardResponse } from "@/lib/types";
-import { GITHUB_PACKAGE_URL, GITHUB_REPOSITORY_URL, LOCAL_APP_VERSION } from "@/lib/version";
+import { GITHUB_CHANGELOG_URL, GITHUB_PACKAGE_URL, GITHUB_REPOSITORY_URL, LOCAL_APP_VERSION } from "@/lib/version";
 
 function createResponse(data: unknown, ok = true, status = 200): Response {
   return {
@@ -137,6 +137,7 @@ describe("DashboardShell", () => {
   it("logs in first and loads the venue only after an explicit action", async () => {
     const fetchMock = createFetchMock(
       createResponse(dashboardFixture.viewer),
+      createResponse(dashboardFixture),
       createResponse(dashboardFixture)
     );
 
@@ -158,15 +159,19 @@ describe("DashboardShell", () => {
     await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
 
     expect(await screen.findByRole("button", { name: /^logout$/i })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /load venue/i })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /load \/ refresh/i })).toBeEnabled();
     expect(appFetchCalls(fetchMock)).toHaveLength(1);
 
-    await user.click(screen.getByRole("button", { name: /load venue/i }));
+    await user.click(screen.getByRole("button", { name: /load \/ refresh/i }));
 
     expect(await screen.findByRole("tab", { name: "Papers" })).toBeInTheDocument();
     expect(await screen.findByRole("tab", { name: "Alerts" })).toBeInTheDocument();
     expect(await screen.findByText("Paper workspace")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "42" })).toBeInTheDocument();
+    const venueSummary = await screen.findByLabelText("Venue summary");
+    expect(within(venueSummary).getByText("Paper #")).toBeInTheDocument();
+    expect(within(venueSummary).getByText("AC #")).toBeInTheDocument();
+    expect(within(venueSummary).getAllByText("1")).toHaveLength(2);
     expect(screen.queryByText("paper42")).not.toBeInTheDocument();
     expect(screen.queryByText("Load a venue.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/batch summary/i)).not.toBeInTheDocument();
@@ -175,11 +180,17 @@ describe("DashboardShell", () => {
     await waitFor(() => {
       expect(appFetchCalls(fetchMock)).toHaveLength(2);
     });
+    expect(String(appFetchCalls(fetchMock)[1][0])).toContain("refresh=0");
     await waitFor(() => {
       expect(JSON.parse(window.localStorage.getItem("arr-sac-dashboard.recent-venues") || "[]")).toEqual([
         "aclweb.org/ACL/ARR/2026/March"
       ]);
     });
+    await user.click(screen.getByRole("button", { name: /load \/ refresh/i }));
+    await waitFor(() => {
+      expect(appFetchCalls(fetchMock)).toHaveLength(3);
+    });
+    expect(String(appFetchCalls(fetchMock)[2][0])).toContain("refresh=1");
   });
 
   it("offers recent valid venue IDs as soft dropdown suggestions", async () => {
@@ -247,7 +258,7 @@ describe("DashboardShell", () => {
     await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
     await user.type(screen.getByLabelText(/password/i), "secret");
     await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
-    await user.click(await screen.findByRole("button", { name: /load venue/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
 
     expect(await screen.findByRole("tab", { name: "Papers" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "AC Dashboard" })).not.toBeInTheDocument();
@@ -271,7 +282,7 @@ describe("DashboardShell", () => {
       await screen.findByRole("link", {
         name: /update available: local version v.+latest version v99\.0\.0/i
       })
-    ).toBeInTheDocument();
+    ).toHaveAttribute("href", GITHUB_CHANGELOG_URL);
     expect(screen.getByText("Update available: v99.0.0")).toBeInTheDocument();
   });
 });
