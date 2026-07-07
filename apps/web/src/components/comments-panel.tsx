@@ -78,6 +78,9 @@ function commentTypeClassName(type: string) {
   if (normalizedType.includes("review issue")) {
     return "comment-type-review-issue";
   }
+  if (normalizedType.includes("program chair")) {
+    return "comment-type-program-chair";
+  }
 
   return "comment-type-comment";
 }
@@ -171,7 +174,7 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
         <div className="empty-state">
           <EmptyStateIcon />
           <h3>No comments need attention.</h3>
-          <p>Confidential comments and issue reports will appear here when they are available.</p>
+          <p>Program Chair comments, confidential comments, and issue reports will appear here when they are available.</p>
         </div>
       ) : null}
 

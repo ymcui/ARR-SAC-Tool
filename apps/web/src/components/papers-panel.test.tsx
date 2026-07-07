@@ -14,7 +14,7 @@ const papersFixture: PaperRecord[] = [
     paperType: "Long",
     areaChair: "~Area_ChairB",
     completedReviews: 3,
-    expectedReviews: 3,
+    expectedReviews: 4,
     readyForRebuttal: true,
     authorResponseReady: true,
     acChecklistReady: true,
@@ -96,9 +96,10 @@ const withdrawnPapersFixture: WithdrawnPaperRecord[] = [
 function renderPapersPanel(
   withdrawnPapers: WithdrawnPaperRecord[] = [],
   venueStage: VenueStage = "ARR Stage",
-  onExport?: () => void
+  onExport?: () => void,
+  papers: PaperRecord[] = papersFixture
 ) {
-  return render(createElement(PapersPanel, { onExport, papers: papersFixture, venueStage, withdrawnPapers }));
+  return render(createElement(PapersPanel, { onExport, papers, venueStage, withdrawnPapers }));
 }
 
 function getPaperOrder() {
@@ -141,6 +142,14 @@ describe("PapersPanel", () => {
     expect(getPaperOrder()).toEqual([107, 88, 42]);
     expect(screen.getByRole("columnheader", { name: /paper/i })).toHaveAttribute("aria-sort", "descending");
 
+    await user.click(screen.getByRole("button", { name: "Reviews" }));
+    expect(getPaperOrder()).toEqual([107, 88, 42]);
+    expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "descending");
+
+    await user.click(screen.getByRole("button", { name: "Reviews" }));
+    expect(getPaperOrder()).toEqual([42, 88, 107]);
+    expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "ascending");
+
     await user.click(screen.getByRole("button", { name: "Ready" }));
     expect(getPaperOrder()).toEqual([42, 88, 107]);
     expect(screen.getByRole("columnheader", { name: /ready/i })).toHaveAttribute("aria-sort", "descending");
@@ -154,6 +163,29 @@ describe("PapersPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Overall" }));
     expect(getPaperOrder()).toEqual([42, 88, 107]);
+  });
+
+  it("sorts review counts by finished reviews before total assigned reviews", async () => {
+    const reviewSortPapers: PaperRecord[] = [
+      ...papersFixture,
+      {
+        ...papersFixture[0],
+        paperNumber: 121,
+        paperId: "paper121",
+        paperTitle: "A Paper With Five Assigned Reviews",
+        completedReviews: 3,
+        expectedReviews: 5,
+        forumUrl: "https://openreview.net/forum?id=paper121"
+      }
+    ];
+    renderPapersPanel([], "ARR Stage", undefined, reviewSortPapers);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Reviews" }));
+    expect(getPaperOrder()).toEqual([107, 88, 42, 121]);
+
+    await user.click(screen.getByRole("button", { name: "Reviews" }));
+    expect(getPaperOrder()).toEqual([121, 42, 88, 107]);
   });
 
   it("renders compact icon status markers in the table", () => {

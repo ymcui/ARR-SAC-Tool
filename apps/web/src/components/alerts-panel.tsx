@@ -21,6 +21,35 @@ type AlertFilters = {
   type: string;
 };
 
+type SortColumn =
+  | "paperNumber"
+  | "areaChair"
+  | "paperType"
+  | "reviews"
+  | "readyForRebuttal"
+  | "emergency"
+  | "delay"
+  | "overallAssessment";
+
+type SortDirection = "asc" | "desc";
+
+type SortDefinition = {
+  column: SortColumn;
+  label: string;
+  defaultDirection: SortDirection;
+};
+
+const ALERT_SORT_DEFINITIONS: SortDefinition[] = [
+  { column: "paperNumber", label: "Paper", defaultDirection: "asc" },
+  { column: "areaChair", label: "Area Chair", defaultDirection: "asc" },
+  { column: "paperType", label: "Type", defaultDirection: "asc" },
+  { column: "reviews", label: "Reviews", defaultDirection: "desc" },
+  { column: "readyForRebuttal", label: "Ready", defaultDirection: "asc" },
+  { column: "emergency", label: "Emergency", defaultDirection: "desc" },
+  { column: "delay", label: "Delay", defaultDirection: "desc" },
+  { column: "overallAssessment", label: "Overall", defaultDirection: "desc" }
+];
+
 function filterNodes(nodes: AlertRecord[], filters: AlertFilters): AlertRecord[] {
   return nodes.flatMap((node) => {
     const filteredChildren = filterNodes(node.children, filters);
@@ -109,6 +138,68 @@ function countAlertType(nodes: AlertRecord[], type: string): number {
   );
 }
 
+function nextDirection(
+  column: SortColumn,
+  currentColumn: SortColumn,
+  currentDirection: SortDirection
+): SortDirection {
+  if (column === currentColumn) {
+    return currentDirection === "asc" ? "desc" : "asc";
+  }
+
+  const definition = ALERT_SORT_DEFINITIONS.find((item) => item.column === column);
+  return definition?.defaultDirection ?? "asc";
+}
+
+function compareNullableNumber(
+  left: number | null | undefined,
+  right: number | null | undefined,
+  direction: SortDirection
+) {
+  if (left == null && right == null) {
+    return 0;
+  }
+  if (left == null) {
+    return 1;
+  }
+  if (right == null) {
+    return -1;
+  }
+  return direction === "asc" ? left - right : right - left;
+}
+
+function compareText(left: string, right: string, direction: SortDirection) {
+  const comparison = left.localeCompare(right, undefined, { sensitivity: "base" });
+  return direction === "asc" ? comparison : -comparison;
+}
+
+function compareBoolean(left: boolean, right: boolean, direction: SortDirection) {
+  const comparison = Number(left) - Number(right);
+  return direction === "asc" ? comparison : -comparison;
+}
+
+function compareReviewProgress(
+  leftCompleted: number | null | undefined,
+  leftExpected: number | null | undefined,
+  rightCompleted: number | null | undefined,
+  rightExpected: number | null | undefined,
+  direction: SortDirection
+) {
+  const reviewDirection = direction === "desc" ? "asc" : "desc";
+
+  return (
+    compareNullableNumber(leftCompleted, rightCompleted, reviewDirection) ||
+    compareNullableNumber(leftExpected, rightExpected, reviewDirection)
+  );
+}
+
+function headerAriaSort(column: SortColumn, sortColumn: SortColumn, sortDirection: SortDirection) {
+  if (column !== sortColumn) {
+    return "none";
+  }
+  return sortDirection === "asc" ? "ascending" : "descending";
+}
+
 function paperSearchText(group: AlertGroup, paper: PaperRecord | undefined, areaChairName: string) {
   return [
     group.paperNumber,
@@ -126,6 +217,8 @@ function paperSearchText(group: AlertGroup, paper: PaperRecord | undefined, area
 export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [sortColumn, setSortColumn] = useState<SortColumn>("readyForRebuttal");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [expandedPaperId, setExpandedPaperId] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
@@ -140,6 +233,10 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
     (total, group) => total + countAlertType(group.items, "Delay Notification"),
     0
   );
+  const activeSortColumn = ALERT_SORT_DEFINITIONS.some((definition) => definition.column === sortColumn)
+    ? sortColumn
+    : "paperNumber";
+  const tableColumnCount = ALERT_SORT_DEFINITIONS.length;
 
   const filteredGroups = alerts
     .map((group) => {
@@ -158,7 +255,81 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
       };
     })
     .filter((group) => group.items.length > 0)
-    .sort((left, right) => left.paperNumber - right.paperNumber);
+    .sort((left, right) => {
+      const leftPaper = paperById.get(left.paperId);
+      const rightPaper = paperById.get(right.paperId);
+      const leftAreaChair = leftPaper ? areaChairById.get(leftPaper.areaChair) : undefined;
+      const rightAreaChair = rightPaper ? areaChairById.get(rightPaper.areaChair) : undefined;
+      const leftAreaChairName =
+        leftPaper?.areaChair ||
+        leftAreaChair?.areaChairName ||
+        (leftPaper?.areaChair ? profileIdDisplayName(leftPaper.areaChair) : "Unassigned");
+      const rightAreaChairName =
+        rightPaper?.areaChair ||
+        rightAreaChair?.areaChairName ||
+        (rightPaper?.areaChair ? profileIdDisplayName(rightPaper.areaChair) : "Unassigned");
+
+      switch (activeSortColumn) {
+        case "paperNumber":
+          return sortDirection === "asc"
+            ? left.paperNumber - right.paperNumber
+            : right.paperNumber - left.paperNumber;
+        case "areaChair":
+          return (
+            compareText(leftAreaChairName, rightAreaChairName, sortDirection) ||
+            left.paperNumber - right.paperNumber
+          );
+        case "paperType":
+          return (
+            compareText(leftPaper?.paperType || "", rightPaper?.paperType || "", sortDirection) ||
+            left.paperNumber - right.paperNumber
+          );
+        case "reviews":
+          return (
+            compareReviewProgress(
+              leftPaper?.completedReviews,
+              leftPaper?.expectedReviews,
+              rightPaper?.completedReviews,
+              rightPaper?.expectedReviews,
+              sortDirection
+            ) || left.paperNumber - right.paperNumber
+          );
+        case "readyForRebuttal":
+          return (
+            compareBoolean(
+              leftPaper?.readyForRebuttal ?? false,
+              rightPaper?.readyForRebuttal ?? false,
+              sortDirection
+            ) || left.paperNumber - right.paperNumber
+          );
+        case "emergency":
+          return (
+            compareNullableNumber(
+              countAlertType(left.items, "Emergency Declaration"),
+              countAlertType(right.items, "Emergency Declaration"),
+              sortDirection
+            ) || left.paperNumber - right.paperNumber
+          );
+        case "delay":
+          return (
+            compareNullableNumber(
+              countAlertType(left.items, "Delay Notification"),
+              countAlertType(right.items, "Delay Notification"),
+              sortDirection
+            ) || left.paperNumber - right.paperNumber
+          );
+        case "overallAssessment":
+          return (
+            compareNullableNumber(
+              leftPaper?.overallAssessment.average,
+              rightPaper?.overallAssessment.average,
+              sortDirection
+            ) || left.paperNumber - right.paperNumber
+          );
+        default:
+          return left.paperNumber - right.paperNumber;
+      }
+    });
 
   const isEmptyDataset = alerts.length === 0;
 
@@ -230,14 +401,34 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
           <table className="data-table alerts-table">
             <thead>
               <tr>
-                <th>Paper</th>
-                <th>Area Chair</th>
-                <th>Type</th>
-                <th>Reviews</th>
-                <th>Ready</th>
-                <th>Emergency</th>
-                <th>Delay</th>
-                <th>Overall</th>
+                {ALERT_SORT_DEFINITIONS.map((definition) => {
+                  const isActive = definition.column === activeSortColumn;
+                  const indicator = !isActive ? "↕" : sortDirection === "asc" ? "↑" : "↓";
+
+                  return (
+                    <th
+                      aria-sort={headerAriaSort(definition.column, activeSortColumn, sortDirection)}
+                      key={definition.column}
+                      scope="col"
+                    >
+                      <button
+                        className={joinClasses("table-head-button", isActive && "active")}
+                        onClick={() => {
+                          setSortDirection((currentDirection) =>
+                            nextDirection(definition.column, activeSortColumn, currentDirection)
+                          );
+                          setSortColumn(definition.column);
+                        }}
+                        type="button"
+                      >
+                        <span>{definition.label}</span>
+                        <span aria-hidden="true" className="sort-indicator">
+                          {indicator}
+                        </span>
+                      </button>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -302,7 +493,7 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
 
                     {expanded ? (
                       <tr className="detail-row" key={`${group.paperId}-detail`}>
-                        <td colSpan={8}>
+                        <td colSpan={tableColumnCount}>
                           <div className="collapsible-shell">
                             <div className="collapsible-inner">
                               <div className="detail-panel-content alert-detail-panel">

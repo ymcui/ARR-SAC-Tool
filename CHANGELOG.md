@@ -2,6 +2,39 @@
 
 All notable user-facing changes are documented here.
 
+## [2.4.1] - 2026-07-07
+
+### Fixed
+
+- Fixed Reviews column sorting in the Papers and Alerts tables so it sorts by finished review count first, then total assigned reviews.
+
+## [2.4.0] - 2026-07-07
+
+### Added
+
+- Added sortable column headers to the Alerts table, matching the Papers table interaction pattern.
+- Defaulted the Alerts table to sort by Ready status so papers not ready for rebuttal appear first.
+
+## [2.3.3] - 2026-07-07
+
+### Fixed
+
+- Recovered dashboard refreshes when a long-running refresh finishes on the API but the local web proxy drops the browser request.
+- Guarded refresh recovery against stale progress from previous loads so the app does not silently reuse old cached data.
+- Changed failed load progress labels from Done to Failed.
+
+## [2.3.2] - 2026-07-05
+
+### Added
+
+- Added Program Chair official comments to the Comments tab as a distinct Program Chairs type.
+- Added a Program Chairs comment badge and filter support.
+
+### Fixed
+
+- Fixed the no-content illustration background so it blends cleanly into empty states.
+- Widened empty-state helper text to avoid awkward wrapping on spacious layouts.
+
 ## [2.3.1] - 2026-07-04
 
 ### Changed

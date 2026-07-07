@@ -142,6 +142,7 @@ export type AnalyticsInfo = {
 
 export type DashboardLoadProgress = {
   venueId: string;
+  loadId?: string | null;
   phase: string;
   message: string;
   current: number;

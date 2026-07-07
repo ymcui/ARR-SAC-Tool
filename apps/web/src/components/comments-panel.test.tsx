@@ -92,4 +92,39 @@ describe("CommentsPanel", () => {
     expect(screen.getByText("Open forum")).toBeInTheDocument();
     expect(screen.queryByText("Needs SAC attention.")).not.toBeInTheDocument();
   });
+
+  it("shows Program Chair comments as a filterable type", async () => {
+    const user = userEvent.setup();
+    render(
+      createElement(CommentsPanel, {
+        comments: [
+          {
+            paperNumber: 10145,
+            paperId: "paper10145",
+            paperTitle: "GPTZero Result Scope",
+            forumUrl: "https://openreview.net/forum?id=paper10145",
+            items: [
+              {
+                noteId: "pc-comment",
+                paperNumber: 10145,
+                paperId: "paper10145",
+                type: "Program Chairs",
+                role: "Program Chair",
+                date: "2026-07-04",
+                content: "GPTZero result requires SAC attention.",
+                link: "https://openreview.net/forum?id=paper10145&noteId=pc-comment",
+                children: []
+              }
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(screen.getByText("Program Chairs: 1")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Type"), "Program Chairs");
+    await user.click(screen.getByRole("button", { name: /paper 10145 gptzero result scope 1 post/i }));
+
+    expect(screen.getByText("GPTZero result requires SAC attention.")).toBeInTheDocument();
+  });
 });

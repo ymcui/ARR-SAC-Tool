@@ -33,6 +33,8 @@ const RECENT_VENUES_STORAGE_KEY = "arr-sac-dashboard.recent-venues";
 const DEFAULT_VENUE_ID = "aclweb.org/ACL/ARR/2026/March";
 const ARR_STAGE_PREFIX = "aclweb.org/ACL/ARR";
 const MAX_RECENT_VENUES = 8;
+const REFRESH_RECOVERY_TIMEOUT_MS = 120000;
+const REFRESH_RECOVERY_POLL_MS = 1000;
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "papers", label: "Papers" },
@@ -49,6 +51,18 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 function apiUrl(path: string): string {
   return path;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function createLoadId(): string {
+  if (typeof window.crypto?.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function getVenueStage(venueId: string): VenueStage {
@@ -155,23 +169,29 @@ export function DashboardShell() {
     }
   }
 
-  async function fetchProgress(nextVenueId: string) {
+  async function fetchProgressSnapshot(nextVenueId: string): Promise<DashboardLoadProgress | null> {
+    const response = await fetch(
+      apiUrl(`/api/dashboard/progress?venueId=${encodeURIComponent(nextVenueId)}`),
+      { credentials: "include" }
+    );
+
+    if (response.status === 401 || !response.ok) {
+      return null;
+    }
+
+    return parseJson<DashboardLoadProgress>(response);
+  }
+
+  function isCurrentProgress(payload: DashboardLoadProgress, loadId: string): boolean {
+    return payload.loadId === loadId;
+  }
+
+  async function fetchProgress(nextVenueId: string, loadId: string) {
     try {
-      const response = await fetch(
-        apiUrl(`/api/dashboard/progress?venueId=${encodeURIComponent(nextVenueId)}`),
-        { credentials: "include" }
-      );
-
-      if (response.status === 401) {
-        stopProgressPolling();
+      const payload = await fetchProgressSnapshot(nextVenueId);
+      if (!payload || !isCurrentProgress(payload, loadId)) {
         return;
       }
-
-      if (!response.ok) {
-        return;
-      }
-
-      const payload = await parseJson<DashboardLoadProgress>(response);
       setLoadProgress(payload);
 
       if (payload.done || payload.error) {
@@ -182,10 +202,11 @@ export function DashboardShell() {
     }
   }
 
-  function startProgressPolling(nextVenueId: string) {
+  function startProgressPolling(nextVenueId: string, loadId: string) {
     stopProgressPolling();
     setLoadProgress({
       venueId: nextVenueId,
+      loadId,
       phase: "venue",
       message: "Starting venue load...",
       current: 0,
@@ -194,8 +215,92 @@ export function DashboardShell() {
       error: null
     });
     progressPollId.current = window.setInterval(() => {
-      void fetchProgress(nextVenueId);
+      void fetchProgress(nextVenueId, loadId);
     }, 1000);
+  }
+
+  function applyDashboardPayload(
+    payload: DashboardResponse,
+    trimmedVenueId: string,
+    progressMessage = `Loaded ${payload.summary.totalPapers} papers for this SAC batch.`
+  ) {
+    startTransition(() => {
+      setDashboard(payload);
+      setViewer(payload.viewer);
+      setVenueId(trimmedVenueId);
+      setActiveTab((current) =>
+        payload.venue.stage === "Commitment Stage" && (current === "ac" || current === "alerts")
+          ? "papers"
+          : current
+      );
+    });
+    setLoadProgress({
+      venueId: trimmedVenueId,
+      phase: "ready",
+      message: progressMessage,
+      current: payload.summary.totalPapers,
+      total: payload.summary.totalPapers,
+      done: true,
+      error: null
+    });
+    window.sessionStorage.setItem(VENUE_STORAGE_KEY, trimmedVenueId);
+    window.sessionStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify(payload.viewer));
+    setRecentVenueIds((currentVenueIds) => addRecentVenueId(trimmedVenueId, currentVenueIds));
+  }
+
+  async function requestCachedDashboard(trimmedVenueId: string, loadId?: string): Promise<DashboardResponse | null> {
+    const loadIdQuery = loadId ? `&loadId=${encodeURIComponent(loadId)}` : "";
+    const response = await fetch(
+      apiUrl(`/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=0${loadIdQuery}`),
+      { credentials: "include" }
+    );
+
+    if (response.status === 401) {
+      clearClientSession();
+      setAuthError("Your OpenReview session expired. Sign in again to continue.");
+      setIsLoginOpen(true);
+      return null;
+    }
+
+    if (!response.ok) {
+      const payload = await parseJson<{ detail?: string }>(response);
+      throw new Error(payload.detail || "Could not load the refreshed venue cache.");
+    }
+
+    return parseJson<DashboardResponse>(response);
+  }
+
+  async function recoverCompletedRefresh(trimmedVenueId: string, loadId: string): Promise<DashboardResponse | null> {
+    const deadline = Date.now() + REFRESH_RECOVERY_TIMEOUT_MS;
+    setLoadProgress({
+      venueId: trimmedVenueId,
+      loadId,
+      phase: "submissions",
+      message: "Refresh is still finishing. Waiting for the updated cache...",
+      current: 0,
+      total: 0,
+      done: false,
+      error: null
+    });
+
+    while (Date.now() < deadline) {
+      const progress = await fetchProgressSnapshot(trimmedVenueId);
+      if (progress && isCurrentProgress(progress, loadId)) {
+        setLoadProgress(progress);
+
+        if (progress.error) {
+          throw new Error(progress.error);
+        }
+
+        if (progress.done) {
+          return requestCachedDashboard(trimmedVenueId, loadId);
+        }
+      }
+
+      await sleep(REFRESH_RECOVERY_POLL_MS);
+    }
+
+    throw new Error("Refresh is still running. Try Load / Refresh again in a moment.");
   }
 
   async function requestDashboard(nextVenueId: string, refresh: boolean) {
@@ -207,13 +312,19 @@ export function DashboardShell() {
 
     setIsLoadingDashboard(true);
     setDashboardError(null);
-    startProgressPolling(trimmedVenueId);
+    const loadId = createLoadId();
+    startProgressPolling(trimmedVenueId, loadId);
+
+    let receivedDashboardResponse = false;
 
     try {
       const response = await fetch(
-        apiUrl(`/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=${refresh ? "1" : "0"}`),
+        apiUrl(
+          `/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=${refresh ? "1" : "0"}&loadId=${encodeURIComponent(loadId)}`
+        ),
         { credentials: "include" }
       );
+      receivedDashboardResponse = true;
 
       if (response.status === 401) {
         clearClientSession();
@@ -228,30 +339,30 @@ export function DashboardShell() {
       }
 
       const payload = await parseJson<DashboardResponse>(response);
-      startTransition(() => {
-        setDashboard(payload);
-        setViewer(payload.viewer);
-        setVenueId(trimmedVenueId);
-        setActiveTab((current) =>
-          payload.venue.stage === "Commitment Stage" && (current === "ac" || current === "alerts")
-            ? "papers"
-            : current
-        );
-      });
-      setLoadProgress({
-        venueId: trimmedVenueId,
-        phase: "ready",
-        message: `Loaded ${payload.summary.totalPapers} papers for this SAC batch.`,
-        current: payload.summary.totalPapers,
-        total: payload.summary.totalPapers,
-        done: true,
-        error: null
-      });
-      window.sessionStorage.setItem(VENUE_STORAGE_KEY, trimmedVenueId);
-      window.sessionStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify(payload.viewer));
-      setRecentVenueIds((currentVenueIds) => addRecentVenueId(trimmedVenueId, currentVenueIds));
+      applyDashboardPayload(payload, trimmedVenueId);
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : "Unexpected dashboard error.";
+      let message = nextError instanceof Error ? nextError.message : "Unexpected dashboard error.";
+
+      if (refresh && !receivedDashboardResponse) {
+        stopProgressPolling();
+
+        try {
+          const recoveredPayload = await recoverCompletedRefresh(trimmedVenueId, loadId);
+          if (!recoveredPayload) {
+            return;
+          }
+
+          applyDashboardPayload(
+            recoveredPayload,
+            trimmedVenueId,
+            "Loaded refreshed data after the local connection recovered."
+          );
+          return;
+        } catch (recoveryError) {
+          message = recoveryError instanceof Error ? recoveryError.message : message;
+        }
+      }
+
       setDashboardError(message);
       setLoadProgress({
         venueId: trimmedVenueId,

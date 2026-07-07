@@ -263,6 +263,59 @@ def test_standalone_official_comments_do_not_enter_comments_tab() -> None:
     assert response.summary.commentsCount == 0
 
 
+def test_program_chair_official_comments_enter_comments_tab() -> None:
+    snapshot = {
+        "viewer": {"id": "~Test_SAC1", "fullname": "Test SAC"},
+        "submission_name": "Submission",
+        "my_sac_groups": ["aclweb.org/ACL/ARR/2026/March/Submission10145/Senior_Area_Chairs"],
+        "submissions": [
+            {
+                "number": 10145,
+                "id": "paper-10145",
+                "readers": ["aclweb.org/ACL/ARR/2026/March/Submission10145/Senior_Area_Chairs"],
+                "content": {"title": {"value": "GPTZero Result Scope"}, "venue": {"value": "ARR"}},
+                "replies": [
+                    {
+                        "id": "program-chair-official-comment",
+                        "forum": "paper-10145",
+                        "tcdate": 1783207320000,
+                        "invitations": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission10145/-/Official_Comment"
+                        ],
+                        "signatures": [
+                            "aclweb.org/ACL/ARR/2026/March/Program_Chairs"
+                        ],
+                        "content": {"comment": {"value": "GPTZero result requires SAC attention."}},
+                    },
+                    {
+                        "id": "sac-official-comment",
+                        "forum": "paper-10145",
+                        "tcdate": 1783207380000,
+                        "invitations": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission10145/-/Official_Comment"
+                        ],
+                        "signatures": [
+                            "aclweb.org/ACL/ARR/2026/March/Submission10145/Senior_Area_Chairs"
+                        ],
+                        "content": {"comment": {"value": "SAC standalone official comment."}},
+                    },
+                ],
+                "area_chairs": ["~Area_Chair1"],
+                "reviewers": [],
+            }
+        ],
+    }
+
+    response = build_dashboard_response(snapshot, "aclweb.org/ACL/ARR/2026/March")
+
+    assert response.summary.commentsCount == 1
+    assert [group.paperNumber for group in response.comments] == [10145]
+    assert response.comments[0].items[0].noteId == "program-chair-official-comment"
+    assert response.comments[0].items[0].type == "Program Chairs"
+    assert response.comments[0].items[0].role == "Program Chair"
+    assert "GPTZero" in response.comments[0].items[0].content
+
+
 def test_alert_matching_is_exact_and_arr_only() -> None:
     snapshot = {
         "viewer": {"id": "~Test_SAC1", "fullname": "Test SAC"},

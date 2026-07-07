@@ -124,7 +124,10 @@ def test_dashboard_progress_endpoint_reports_completion_state() -> None:
     )
     assert login_response.status_code == 200
 
-    dashboard_response = client.get("/api/dashboard", params={"venueId": "aclweb.org/ACL/ARR/2026/March"})
+    dashboard_response = client.get(
+        "/api/dashboard",
+        params={"venueId": "aclweb.org/ACL/ARR/2026/March", "loadId": "load-progress-test"},
+    )
     assert dashboard_response.status_code == 200
 
     progress_response = client.get(
@@ -132,6 +135,7 @@ def test_dashboard_progress_endpoint_reports_completion_state() -> None:
         params={"venueId": "aclweb.org/ACL/ARR/2026/March"},
     )
     assert progress_response.status_code == 200
+    assert progress_response.json()["loadId"] == "load-progress-test"
     assert progress_response.json()["phase"] == "ready"
     assert progress_response.json()["done"] is True
 

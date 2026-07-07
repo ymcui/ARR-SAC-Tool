@@ -29,7 +29,6 @@
 
   </defs>
 
-  <rect width="402" height="386" fill="#FFFFFF"/>
   <rect x="26.5" y="20.5" width="339" height="339" rx="52.5" fill="#FFFFFF" stroke="url(#borderGrad)" stroke-width="2.6"/>
 
   <!-- small floating dots at the left of the air marks -->

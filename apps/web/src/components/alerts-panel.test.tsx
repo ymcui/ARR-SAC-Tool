@@ -140,14 +140,21 @@ const alertsFixture: AlertGroup[] = [
   }
 ];
 
-function renderAlertsPanel(alerts: AlertGroup[] = alertsFixture) {
+function renderAlertsPanel(alerts: AlertGroup[] = alertsFixture, papers: PaperRecord[] = papersFixture) {
   render(
     createElement(AlertsPanel, {
       alerts,
       areaChairs: areaChairsFixture,
-      papers: papersFixture
+      papers
     })
   );
+}
+
+function getAlertPaperOrder() {
+  return screen
+    .getAllByRole("button")
+    .filter((button) => /^\d+$/.test((button.textContent || "").trim()))
+    .map((button) => Number(button.textContent));
 }
 
 describe("AlertsPanel", () => {
@@ -189,6 +196,85 @@ describe("AlertsPanel", () => {
     expect(screen.getByText(/finding a replacement reviewer/i)).toBeInTheDocument();
     expect(screen.getByText(/four more days/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open forum" })).toBeInTheDocument();
+  });
+
+  it("sorts alert rows through clickable headers", async () => {
+    renderAlertsPanel();
+    const user = userEvent.setup();
+
+    expect(screen.getByRole("columnheader", { name: /ready/i })).toHaveAttribute("aria-sort", "ascending");
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "42" })).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("columnheader", { name: /paper/i })).getByRole("button"));
+    expect(screen.getByRole("columnheader", { name: /paper/i })).toHaveAttribute("aria-sort", "ascending");
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "42" })).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("columnheader", { name: /paper/i })).getByRole("button"));
+    expect(screen.getByRole("columnheader", { name: /paper/i })).toHaveAttribute("aria-sort", "descending");
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "88" })).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
+    expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "descending");
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "42" })).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
+    expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "ascending");
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "88" })).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("columnheader", { name: /emergency/i })).getByRole("button"));
+    expect(screen.getByRole("columnheader", { name: /emergency/i })).toHaveAttribute("aria-sort", "descending");
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "42" })).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("columnheader", { name: /overall/i })).getByRole("button"));
+    expect(screen.getByRole("columnheader", { name: /overall/i })).toHaveAttribute("aria-sort", "descending");
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "88" })).toBeInTheDocument();
+  });
+
+  it("sorts alert review counts by finished reviews before total assigned reviews", async () => {
+    const reviewSortPapers: PaperRecord[] = [
+      ...papersFixture,
+      {
+        ...papersFixture[1],
+        paperNumber: 121,
+        paperId: "paper121",
+        paperTitle: "A Paper With Five Assigned Reviews",
+        completedReviews: 3,
+        expectedReviews: 5,
+        readyForRebuttal: false,
+        forumUrl: "https://openreview.net/forum?id=paper121"
+      }
+    ];
+    const reviewSortAlerts: AlertGroup[] = [
+      ...alertsFixture,
+      {
+        paperNumber: 121,
+        paperId: "paper121",
+        paperTitle: "A Paper With Five Assigned Reviews",
+        forumUrl: "https://openreview.net/forum?id=paper121",
+        items: [
+          {
+            noteId: "delay121",
+            paperNumber: 121,
+            paperId: "paper121",
+            type: "Delay Notification",
+            role: "Reviewer",
+            signerLabel: "Reviewer Five",
+            date: "2026-07-04",
+            content: "**Notification:** Review will arrive soon.",
+            link: "https://openreview.net/forum?id=paper121&noteId=delay121",
+            children: []
+          }
+        ]
+      }
+    ];
+    renderAlertsPanel(reviewSortAlerts, reviewSortPapers);
+    const user = userEvent.setup();
+
+    await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
+    expect(getAlertPaperOrder()).toEqual([42, 88, 121]);
+
+    await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
+    expect(getAlertPaperOrder()).toEqual([121, 88, 42]);
   });
 
   it("filters table rows by alert type", async () => {

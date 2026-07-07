@@ -23,6 +23,10 @@ type VenueWorkspacePanelProps = {
 const RECENT_VENUES_LISTBOX_ID = "recent-venue-ids";
 
 function formatProgressLabel(progress: DashboardLoadProgress) {
+  if (progress.error) {
+    return "Failed";
+  }
+
   if (progress.total > 0) {
     return `${Math.min(progress.current, progress.total)}/${progress.total}`;
   }

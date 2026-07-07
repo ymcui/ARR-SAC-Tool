@@ -1595,6 +1595,10 @@ select {
   background: #d891ff;
 }
 
+.comment-type-program-chair {
+  background: #ffd1b3;
+}
+
 .comment-type-comment {
   background: #d9ecff;
 }
@@ -1834,7 +1838,7 @@ select {
 }
 
 .empty-state p {
-  max-width: 40rem;
+  max-width: 72rem;
   margin: 0;
   color: var(--muted);
   line-height: 1.55;

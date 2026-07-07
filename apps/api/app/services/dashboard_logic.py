@@ -823,7 +823,7 @@ def _is_relevant_comment(reply: Dict[str, Any]) -> bool:
         "/-/Comment",
         "/-/Review_Issue_Report",
     ]
-    return any(part in invitation for invitation in invitations for part in parts)
+    return any(part in invitation for invitation in invitations for part in parts) or _is_program_chair_official_comment(reply)
 
 
 def _is_confidential_comment(reply: Dict[str, Any]) -> bool:
@@ -852,6 +852,14 @@ def _is_official_comment(reply: Dict[str, Any]) -> bool:
     return any(
         invitation.endswith("/-/Comment") or invitation.endswith("/-/Official_Comment")
         for invitation in invitations
+    )
+
+
+def _is_program_chair_official_comment(reply: Dict[str, Any]) -> bool:
+    invitations = reply.get("invitations", [])
+    signatures = reply.get("signatures", [])
+    return any(invitation.endswith("/-/Official_Comment") for invitation in invitations) and any(
+        "/Program_Chairs" in signature for signature in signatures
     )
 
 
@@ -889,6 +897,8 @@ def _extract_meta_review_text(reply: Dict[str, Any]) -> str:
 
 def _classify_comment_type(reply: Dict[str, Any]) -> str:
     invitations = reply.get("invitations", [])
+    if _is_program_chair_official_comment(reply):
+        return "Program Chairs"
     if any("/-/Review_Issue_Report" in invitation for invitation in invitations):
         return "Review Issue"
     if any("/-/Author-Editor_Confidential_Comment" in invitation for invitation in invitations):

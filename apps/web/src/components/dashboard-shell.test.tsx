@@ -193,6 +193,103 @@ describe("DashboardShell", () => {
     expect(String(appFetchCalls(fetchMock)[2][0])).toContain("refresh=1");
   });
 
+  it("recovers a refresh when the long dashboard request disconnects after the backend finishes", async () => {
+    const refreshedDashboardFixture: DashboardResponse = {
+      ...dashboardFixture,
+      venue: {
+        ...dashboardFixture.venue,
+        lastSyncedAt: "2026-04-24T12:00:00.000Z"
+      },
+      papers: [
+        {
+          ...dashboardFixture.papers[0],
+          paperNumber: 77,
+          paperId: "paper77",
+          paperTitle: "Recovered Refresh Paper",
+          forumUrl: "https://openreview.net/forum?id=paper77"
+        }
+      ]
+    };
+    let cachedDashboardCalls = 0;
+    let currentRefreshLoadId: string | null = null;
+    let recoveryProgressCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === GITHUB_PACKAGE_URL) {
+        return createResponse({ version: "2.1.2" });
+      }
+
+      if (url === "/api/session/login") {
+        return createResponse(dashboardFixture.viewer);
+      }
+
+      if (url.startsWith("/api/dashboard/progress")) {
+        recoveryProgressCalls += 1;
+        if (recoveryProgressCalls === 1) {
+          return createResponse({
+            venueId: dashboardFixture.venue.venueId,
+            loadId: "previous-load",
+            phase: "ready",
+            message: "Loaded stale workspace.",
+            current: 1,
+            total: 1,
+            done: true,
+            error: null
+          });
+        }
+
+        return createResponse({
+          venueId: dashboardFixture.venue.venueId,
+          loadId: currentRefreshLoadId,
+          phase: "ready",
+          message: "Loaded refreshed workspace.",
+          current: 1,
+          total: 1,
+          done: true,
+          error: null
+        });
+      }
+
+      if (url.startsWith("/api/dashboard?") && url.includes("refresh=0")) {
+        cachedDashboardCalls += 1;
+        return createResponse(cachedDashboardCalls === 1 ? dashboardFixture : refreshedDashboardFixture);
+      }
+
+      if (url.startsWith("/api/dashboard?") && url.includes("refresh=1")) {
+        currentRefreshLoadId = new URL(url, "http://localhost").searchParams.get("loadId");
+        throw new TypeError("The string did not match the expected pattern.");
+      }
+
+      throw new Error(`Unexpected fetch call: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(createElement(DashboardShell));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+
+    expect(await screen.findByRole("button", { name: "42" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /load \/ refresh/i }));
+
+    expect(await screen.findByRole("button", { name: "77" }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText("The string did not match the expected pattern.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "42" })).not.toBeInTheDocument();
+
+    const requestUrls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(requestUrls.some((url) => url.includes("refresh=1"))).toBe(true);
+    expect(requestUrls.some((url) => url.startsWith("/api/dashboard/progress"))).toBe(true);
+    expect(recoveryProgressCalls).toBeGreaterThanOrEqual(2);
+    expect(requestUrls.filter((url) => url.startsWith("/api/dashboard?") && url.includes("refresh=0"))).toHaveLength(2);
+  });
+
   it("offers recent valid venue IDs as soft dropdown suggestions", async () => {
     window.localStorage.setItem(
       "arr-sac-dashboard.recent-venues",

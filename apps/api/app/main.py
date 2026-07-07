@@ -87,6 +87,7 @@ def create_app(
         request: Request,
         venueId: str = Query(..., min_length=3),
         refresh: bool = Query(False),
+        loadId: Optional[str] = Query(None),
     ) -> DashboardResponse:
         request_started_at = time.perf_counter()
         session_id = request.cookies.get(SESSION_COOKIE_NAME)
@@ -113,6 +114,7 @@ def create_app(
                     venueId,
                     DashboardLoadProgress(
                         venueId=venueId,
+                        loadId=loadId,
                         phase="ready",
                         message="Loaded cached workspace.",
                         current=len(cached.papers),
@@ -135,6 +137,7 @@ def create_app(
                 venueId,
                 DashboardLoadProgress(
                     venueId=venueId,
+                    loadId=loadId,
                     phase=phase,
                     message=message,
                     current=current,

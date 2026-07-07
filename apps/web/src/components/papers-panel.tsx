@@ -129,6 +129,21 @@ function compareBoolean(left: boolean, right: boolean, direction: SortDirection)
   return direction === "asc" ? comparison : -comparison;
 }
 
+function compareReviewProgress(
+  leftCompleted: number,
+  leftExpected: number,
+  rightCompleted: number,
+  rightExpected: number,
+  direction: SortDirection
+) {
+  const reviewDirection = direction === "desc" ? "asc" : "desc";
+
+  return (
+    compareNullableNumber(leftCompleted, rightCompleted, reviewDirection) ||
+    compareNullableNumber(leftExpected, rightExpected, reviewDirection)
+  );
+}
+
 function headerAriaSort(column: SortColumn, sortColumn: SortColumn, sortDirection: SortDirection) {
   if (column !== sortColumn) {
     return "none";
@@ -269,12 +284,16 @@ export function PapersPanel({
             compareText(left.paperType || "", right.paperType || "", sortDirection) ||
             left.paperNumber - right.paperNumber
           );
-        case "reviews": {
-          const leftGap = left.expectedReviews - left.completedReviews;
-          const rightGap = right.expectedReviews - right.completedReviews;
-          const comparison = sortDirection === "asc" ? leftGap - rightGap : rightGap - leftGap;
-          return comparison || left.paperNumber - right.paperNumber;
-        }
+        case "reviews":
+          return (
+            compareReviewProgress(
+              left.completedReviews,
+              left.expectedReviews,
+              right.completedReviews,
+              right.expectedReviews,
+              sortDirection
+            ) || left.paperNumber - right.paperNumber
+          );
         case "readyForRebuttal":
           return (
             compareBoolean(left.readyForRebuttal, right.readyForRebuttal, sortDirection) ||

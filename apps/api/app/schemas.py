@@ -152,6 +152,7 @@ class AnalyticsInfo(BaseModel):
 
 class DashboardLoadProgress(BaseModel):
     venueId: str
+    loadId: Optional[str] = None
     phase: str = "idle"
     message: str = ""
     current: int = 0
