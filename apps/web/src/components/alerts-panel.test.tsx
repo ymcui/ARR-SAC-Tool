@@ -172,6 +172,8 @@ describe("AlertsPanel", () => {
     const summary = screen.getByLabelText("Alerts summary");
     const dataRows = screen.getAllByRole("row").slice(1);
 
+    expect(within(summary).getByText("Ready")).toBeInTheDocument();
+    expect(within(summary).getByText("1/2")).toBeInTheDocument();
     expect(within(summary).getByText("Emergency")).toBeInTheDocument();
     expect(within(summary).getByText("Delay")).toBeInTheDocument();
     expect(within(summary).getByText("1")).toBeInTheDocument();

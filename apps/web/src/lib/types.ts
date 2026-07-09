@@ -45,6 +45,7 @@ export type PaperRecord = {
   excitementScore: ScoreSummary;
   overallAssessment: ScoreSummary;
   metaReviewScore: number | null;
+  metaReviewConfidence?: ScoreSummary;
   metaReviewText: string;
   responseToMetaReview: string;
   forumUrl: string;

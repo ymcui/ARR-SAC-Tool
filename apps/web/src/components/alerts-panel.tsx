@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useDeferredValue, useState } from "react";
+import { Fragment, useDeferredValue, useMemo, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,6 +19,11 @@ type AlertsPanelProps = {
 type AlertFilters = {
   search: string;
   type: string;
+};
+
+type DisplayAlertGroup = AlertGroup & {
+  delayCount: number;
+  emergencyCount: number;
 };
 
 type SortColumn =
@@ -222,114 +227,133 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
   const [expandedPaperId, setExpandedPaperId] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
-  const paperById = new Map(papers.map((paper) => [paper.paperId, paper]));
-  const areaChairById = new Map(areaChairs.map((areaChair) => [areaChair.areaChair, areaChair]));
-  const types = [...new Set(alerts.flatMap((group) => group.items.flatMap(flattenTypes)))].sort();
-  const totalEmergencyCount = alerts.reduce(
-    (total, group) => total + countAlertType(group.items, "Emergency Declaration"),
-    0
+  const paperById = useMemo(() => new Map(papers.map((paper) => [paper.paperId, paper])), [papers]);
+  const areaChairById = useMemo(
+    () => new Map(areaChairs.map((areaChair) => [areaChair.areaChair, areaChair])),
+    [areaChairs]
   );
-  const totalDelayCount = alerts.reduce(
-    (total, group) => total + countAlertType(group.items, "Delay Notification"),
-    0
+  const types = useMemo(
+    () => [...new Set(alerts.flatMap((group) => group.items.flatMap(flattenTypes)))].sort(),
+    [alerts]
+  );
+  const { readyAlertPapers, totalAlertPapers, totalDelayCount, totalEmergencyCount } = useMemo(
+    () => ({
+      readyAlertPapers: alerts.reduce((total, group) => {
+        const paper = paperById.get(group.paperId);
+        return total + (paper?.readyForRebuttal ? 1 : 0);
+      }, 0),
+      totalAlertPapers: alerts.length,
+      totalDelayCount: alerts.reduce(
+        (total, group) => total + countAlertType(group.items, "Delay Notification"),
+        0
+      ),
+      totalEmergencyCount: alerts.reduce(
+        (total, group) => total + countAlertType(group.items, "Emergency Declaration"),
+        0
+      )
+    }),
+    [alerts, paperById]
   );
   const activeSortColumn = ALERT_SORT_DEFINITIONS.some((definition) => definition.column === sortColumn)
     ? sortColumn
     : "paperNumber";
   const tableColumnCount = ALERT_SORT_DEFINITIONS.length;
 
-  const filteredGroups = alerts
-    .map((group) => {
-      const paper = paperById.get(group.paperId);
-      const areaChair = paper ? areaChairById.get(paper.areaChair) : undefined;
-      const areaChairName =
-        areaChair?.areaChairName || (paper?.areaChair ? profileIdDisplayName(paper.areaChair) : "");
-      const paperHit = Boolean(deferredSearch && paperSearchText(group, paper, areaChairName).includes(deferredSearch));
+  const filteredGroups = useMemo<DisplayAlertGroup[]>(
+    () =>
+      alerts
+        .map((group) => {
+          const paper = paperById.get(group.paperId);
+          const areaChair = paper ? areaChairById.get(paper.areaChair) : undefined;
+          const areaChairName =
+            areaChair?.areaChairName || (paper?.areaChair ? profileIdDisplayName(paper.areaChair) : "");
+          const paperHit = Boolean(
+            deferredSearch && paperSearchText(group, paper, areaChairName).includes(deferredSearch)
+          );
+          const items = filterNodes(group.items, {
+            search: paperHit ? "" : deferredSearch,
+            type: typeFilter
+          });
 
-      return {
-        ...group,
-        items: filterNodes(group.items, {
-          search: paperHit ? "" : deferredSearch,
-          type: typeFilter
+          return {
+            ...group,
+            delayCount: countAlertType(items, "Delay Notification"),
+            emergencyCount: countAlertType(items, "Emergency Declaration"),
+            items
+          };
         })
-      };
-    })
-    .filter((group) => group.items.length > 0)
-    .sort((left, right) => {
-      const leftPaper = paperById.get(left.paperId);
-      const rightPaper = paperById.get(right.paperId);
-      const leftAreaChair = leftPaper ? areaChairById.get(leftPaper.areaChair) : undefined;
-      const rightAreaChair = rightPaper ? areaChairById.get(rightPaper.areaChair) : undefined;
-      const leftAreaChairName =
-        leftPaper?.areaChair ||
-        leftAreaChair?.areaChairName ||
-        (leftPaper?.areaChair ? profileIdDisplayName(leftPaper.areaChair) : "Unassigned");
-      const rightAreaChairName =
-        rightPaper?.areaChair ||
-        rightAreaChair?.areaChairName ||
-        (rightPaper?.areaChair ? profileIdDisplayName(rightPaper.areaChair) : "Unassigned");
+        .filter((group) => group.items.length > 0)
+        .sort((left, right) => {
+          const leftPaper = paperById.get(left.paperId);
+          const rightPaper = paperById.get(right.paperId);
+          const leftAreaChair = leftPaper ? areaChairById.get(leftPaper.areaChair) : undefined;
+          const rightAreaChair = rightPaper ? areaChairById.get(rightPaper.areaChair) : undefined;
+          const leftAreaChairName =
+            leftPaper?.areaChair ||
+            leftAreaChair?.areaChairName ||
+            (leftPaper?.areaChair ? profileIdDisplayName(leftPaper.areaChair) : "Unassigned");
+          const rightAreaChairName =
+            rightPaper?.areaChair ||
+            rightAreaChair?.areaChairName ||
+            (rightPaper?.areaChair ? profileIdDisplayName(rightPaper.areaChair) : "Unassigned");
 
-      switch (activeSortColumn) {
-        case "paperNumber":
-          return sortDirection === "asc"
-            ? left.paperNumber - right.paperNumber
-            : right.paperNumber - left.paperNumber;
-        case "areaChair":
-          return (
-            compareText(leftAreaChairName, rightAreaChairName, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "paperType":
-          return (
-            compareText(leftPaper?.paperType || "", rightPaper?.paperType || "", sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "reviews":
-          return (
-            compareReviewProgress(
-              leftPaper?.completedReviews,
-              leftPaper?.expectedReviews,
-              rightPaper?.completedReviews,
-              rightPaper?.expectedReviews,
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        case "readyForRebuttal":
-          return (
-            compareBoolean(
-              leftPaper?.readyForRebuttal ?? false,
-              rightPaper?.readyForRebuttal ?? false,
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        case "emergency":
-          return (
-            compareNullableNumber(
-              countAlertType(left.items, "Emergency Declaration"),
-              countAlertType(right.items, "Emergency Declaration"),
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        case "delay":
-          return (
-            compareNullableNumber(
-              countAlertType(left.items, "Delay Notification"),
-              countAlertType(right.items, "Delay Notification"),
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        case "overallAssessment":
-          return (
-            compareNullableNumber(
-              leftPaper?.overallAssessment.average,
-              rightPaper?.overallAssessment.average,
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        default:
-          return left.paperNumber - right.paperNumber;
-      }
-    });
+          switch (activeSortColumn) {
+            case "paperNumber":
+              return sortDirection === "asc"
+                ? left.paperNumber - right.paperNumber
+                : right.paperNumber - left.paperNumber;
+            case "areaChair":
+              return (
+                compareText(leftAreaChairName, rightAreaChairName, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "paperType":
+              return (
+                compareText(leftPaper?.paperType || "", rightPaper?.paperType || "", sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "reviews":
+              return (
+                compareReviewProgress(
+                  leftPaper?.completedReviews,
+                  leftPaper?.expectedReviews,
+                  rightPaper?.completedReviews,
+                  rightPaper?.expectedReviews,
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
+            case "readyForRebuttal":
+              return (
+                compareBoolean(
+                  leftPaper?.readyForRebuttal ?? false,
+                  rightPaper?.readyForRebuttal ?? false,
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
+            case "emergency":
+              return (
+                compareNullableNumber(left.emergencyCount, right.emergencyCount, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "delay":
+              return (
+                compareNullableNumber(left.delayCount, right.delayCount, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "overallAssessment":
+              return (
+                compareNullableNumber(
+                  leftPaper?.overallAssessment.average,
+                  rightPaper?.overallAssessment.average,
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
+            default:
+              return left.paperNumber - right.paperNumber;
+          }
+        }),
+    [activeSortColumn, alerts, areaChairById, deferredSearch, paperById, sortDirection, typeFilter]
+  );
 
   const isEmptyDataset = alerts.length === 0;
 
@@ -346,6 +370,10 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
         </div>
         <div className="comments-header-controls alerts-header-controls">
           <div className="papers-summary-pills" aria-label="Alerts summary">
+            <div className="papers-summary-pill">
+              <span className="papers-summary-pill-label">Ready</span>
+              <span className="papers-summary-pill-value">{`${readyAlertPapers}/${totalAlertPapers}`}</span>
+            </div>
             <div className="papers-summary-pill">
               <span className="papers-summary-pill-label">Emergency</span>
               <span className="papers-summary-pill-value">{totalEmergencyCount}</span>
@@ -438,8 +466,6 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
                 const areaChairName =
                   areaChair?.areaChairName || (paper?.areaChair ? profileIdDisplayName(paper.areaChair) : "Unassigned");
                 const expanded = expandedPaperId === group.paperId;
-                const emergencyCount = countAlertType(group.items, "Emergency Declaration");
-                const delayCount = countAlertType(group.items, "Delay Notification");
                 const reviewStatus = paper
                   ? formatCountPair(paper.completedReviews, paper.expectedReviews)
                   : "Unknown";
@@ -483,10 +509,10 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
                         <TableBooleanIcon label="Ready" value={paper?.readyForRebuttal ?? false} />
                       </td>
                       <td>
-                        <span className="alert-count-badge emergency">{emergencyCount}</span>
+                        <span className="alert-count-badge emergency">{group.emergencyCount}</span>
                       </td>
                       <td>
-                        <span className="alert-count-badge delay">{delayCount}</span>
+                        <span className="alert-count-badge delay">{group.delayCount}</span>
                       </td>
                       <td>{overallScore}</td>
                     </tr>

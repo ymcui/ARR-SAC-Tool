@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from app.schemas import DashboardLoadProgress, DashboardResponse, ViewerInfo
 
-DASHBOARD_CACHE_VERSION = 10
+DASHBOARD_CACHE_VERSION = 11
 
 
 def _model_dump(model: Any) -> dict:
@@ -37,11 +37,20 @@ class CachedProgress:
 
 
 @dataclass
+class InflightDashboardLoad:
+    event: threading.Event = field(default_factory=threading.Event)
+    started_at: float = field(default_factory=time.time)
+    error: str | None = None
+    status_code: int = 500
+
+
+@dataclass
 class SessionEntry:
     client: Any
     viewer: ViewerInfo
     cache: Dict[str, CachedDashboard] = field(default_factory=dict)
     progress: Dict[str, CachedProgress] = field(default_factory=dict)
+    inflight_dashboard_loads: Dict[str, InflightDashboardLoad] = field(default_factory=dict)
 
 
 class SessionStore:
@@ -63,6 +72,38 @@ class SessionStore:
     def delete_session(self, session_id: str) -> None:
         with self._lock:
             self._sessions.pop(session_id, None)
+
+    def begin_dashboard_load(self, session_id: str, venue_id: str) -> tuple[bool, Optional[InflightDashboardLoad]]:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return False, None
+
+            existing = session.inflight_dashboard_loads.get(venue_id)
+            if existing is not None and not existing.event.is_set():
+                return False, existing
+
+            load = InflightDashboardLoad()
+            session.inflight_dashboard_loads[venue_id] = load
+            return True, load
+
+    def finish_dashboard_load(
+        self,
+        session_id: str,
+        venue_id: str,
+        load: InflightDashboardLoad,
+        *,
+        error: str | None = None,
+        status_code: int = 500,
+    ) -> None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is not None and session.inflight_dashboard_loads.get(venue_id) is load:
+                session.inflight_dashboard_loads.pop(venue_id, None)
+
+            load.error = error
+            load.status_code = status_code
+            load.event.set()
 
     def cache_dashboard(self, session_id: str, venue_id: str, payload: DashboardResponse) -> None:
         with self._lock:

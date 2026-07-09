@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { CommentsPanel } from "@/components/comments-panel";
-import type { CommentGroup } from "@/lib/types";
+import type { CommentGroup, PaperRecord } from "@/lib/types";
 
 const commentsFixture: CommentGroup[] = [
   {
@@ -58,6 +58,33 @@ const commentsFixture: CommentGroup[] = [
   }
 ];
 
+const papersFixture: PaperRecord[] = [
+  {
+    paperNumber: 42,
+    paperId: "paper42",
+    paperTitle: "A Careful Study of Reviewer Discussion Dynamics",
+    paperType: "Long",
+    areaChair: "~Area_Chair1",
+    completedReviews: 3,
+    expectedReviews: 3,
+    readyForRebuttal: true,
+    authorResponseReady: true,
+    acChecklistReady: true,
+    resubmission: false,
+    preprint: false,
+    hasConfidential: false,
+    issueReport: false,
+    reviewerConfidence: { average: 3.5, values: [3.5, 3.5, 3.5] },
+    soundnessScore: { average: 3.2, values: [3, 3.5, 3] },
+    excitementScore: { average: 3, values: [3, 3, 3] },
+    overallAssessment: { average: 3, values: [3.5, 2.5, 3] },
+    metaReviewScore: null,
+    metaReviewText: "",
+    responseToMetaReview: "",
+    forumUrl: "https://openreview.net/forum?id=paper42"
+  }
+];
+
 describe("CommentsPanel", () => {
   it("renders an empty state when there are no comments", () => {
     render(createElement(CommentsPanel, { comments: [] }));
@@ -91,6 +118,13 @@ describe("CommentsPanel", () => {
     expect(screen.getByText("We added the missing baseline detail.")).toBeInTheDocument();
     expect(screen.getByText("Open forum")).toBeInTheDocument();
     expect(screen.queryByText("Needs SAC attention.")).not.toBeInTheDocument();
+  });
+
+  it("shows overall score context beside the paper number when paper data is available", () => {
+    render(createElement(CommentsPanel, { comments: commentsFixture, papers: papersFixture }));
+
+    expect(screen.getByText("Paper 42")).toBeInTheDocument();
+    expect(screen.getByText("Overall 3.0 (3.5 / 2.5 / 3.0)")).toBeInTheDocument();
   });
 
   it("shows Program Chair comments as a filterable type", async () => {

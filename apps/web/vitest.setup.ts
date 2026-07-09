@@ -36,6 +36,7 @@ if (typeof window.localStorage?.getItem !== "function") {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  window.history.replaceState({}, "", "/");
   window.sessionStorage.clear();
   if (typeof window.localStorage?.clear === "function") {
     window.localStorage.clear();

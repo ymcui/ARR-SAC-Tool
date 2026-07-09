@@ -1,11 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
+
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Line,
   LineChart,
   Pie,
@@ -27,9 +28,17 @@ type AnalyticsPanelProps = {
 };
 
 const META_REVIEW_SCORE_TICKS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+const INDIVIDUAL_SCORE_TICKS = META_REVIEW_SCORE_TICKS;
+const REVIEW_SCORE_EDGES = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5];
 const PAPER_TYPE_COLORS = ["#315fd6", "#35b8b2", "#a6542f"];
 const REVIEW_BAR_COLOR = "#315fd6";
 const NO_REVIEW_BAR_COLOR = "#d94f70";
+const SCORE_LINE_COLORS = {
+  overallAssessment: "#d94f70",
+  excitementScore: "#56a8f5",
+  soundnessScore: "#d7a51f",
+  reviewerConfidence: "#9aa8bd"
+};
 
 type PaperTypePoint = {
   name: string;
@@ -42,6 +51,27 @@ type ReviewCountPoint = {
   label: string;
   paperCount: number;
   tooltipLabel: string;
+};
+
+type ScoreDistributionPoint = {
+  label: string;
+  center: number;
+  overallAssessment: number;
+  excitementScore: number;
+  soundnessScore: number;
+  reviewerConfidence: number;
+};
+
+type MetaReviewDistributionPoint = {
+  score: number;
+  metaReviewScore: number;
+  metaReviewConfidence: number;
+};
+
+type IndividualOverallScorePoint = {
+  score: number;
+  label: string;
+  reviewCount: number;
 };
 
 function formatPaperShare(count: number, total: number) {
@@ -112,11 +142,154 @@ function buildReviewCountData(papers: PaperRecord[]): ReviewCountPoint[] {
   });
 }
 
+function scoreHistogramLabel(index: number) {
+  if (index === REVIEW_SCORE_EDGES.length - 2) {
+    return REVIEW_SCORE_EDGES[index].toFixed(1);
+  }
+  return `${REVIEW_SCORE_EDGES[index].toFixed(1)}-${REVIEW_SCORE_EDGES[index + 1].toFixed(1)}`;
+}
+
+function scoreHistogramCenter(index: number) {
+  if (index === REVIEW_SCORE_EDGES.length - 2) {
+    return REVIEW_SCORE_EDGES[index];
+  }
+  return (REVIEW_SCORE_EDGES[index] + REVIEW_SCORE_EDGES[index + 1]) / 2;
+}
+
+function formatScoreHistogramTooltipLabel(value: unknown) {
+  if (typeof value !== "string") {
+    return String(value ?? "");
+  }
+
+  const scoreRangeMatch = value.match(/^(\d(?:\.\d)?)-(\d(?:\.\d)?)$/);
+  if (!scoreRangeMatch) {
+    return `Score: ${value}`;
+  }
+
+  const [, lowerBound, upperBound] = scoreRangeMatch;
+  return `${lowerBound} <= score < ${upperBound}`;
+}
+
+function buildScoreHistogram(papers: PaperRecord[], scoreKey: keyof Pick<PaperRecord, "excitementScore" | "soundnessScore" | "reviewerConfidence">) {
+  const counts = new Map<string, number>();
+  for (let index = 0; index < REVIEW_SCORE_EDGES.length - 1; index += 1) {
+    counts.set(scoreHistogramLabel(index), 0);
+  }
+
+  for (const paper of papers) {
+    const average = paper[scoreKey].average;
+    if (average == null) {
+      continue;
+    }
+
+    for (let index = 0; index < REVIEW_SCORE_EDGES.length - 1; index += 1) {
+      const lowerBound = REVIEW_SCORE_EDGES[index];
+      const upperBound = REVIEW_SCORE_EDGES[index + 1];
+      if (lowerBound <= average && (average < upperBound || index === REVIEW_SCORE_EDGES.length - 2)) {
+        const label = scoreHistogramLabel(index);
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+        break;
+      }
+    }
+  }
+
+  return counts;
+}
+
+function buildScoreDistributionData(
+  overallAssessmentHistogram: AnalyticsInfo["overallAssessmentHistogram"],
+  papers: PaperRecord[]
+): ScoreDistributionPoint[] {
+  const excitementCounts = buildScoreHistogram(papers, "excitementScore");
+  const soundnessCounts = buildScoreHistogram(papers, "soundnessScore");
+  const confidenceCounts = buildScoreHistogram(papers, "reviewerConfidence");
+  const overallCounts = new Map(overallAssessmentHistogram.map((point) => [point.label, point]));
+
+  return Array.from({ length: REVIEW_SCORE_EDGES.length - 1 }, (_, index) => {
+    const label = scoreHistogramLabel(index);
+    const overallPoint = overallCounts.get(label);
+
+    return {
+      label,
+      center: overallPoint?.center ?? scoreHistogramCenter(index),
+      overallAssessment: overallPoint?.count ?? 0,
+      excitementScore: excitementCounts.get(label) ?? 0,
+      soundnessScore: soundnessCounts.get(label) ?? 0,
+      reviewerConfidence: confidenceCounts.get(label) ?? 0
+    };
+  });
+}
+
+function buildIndividualOverallScoreData(papers: PaperRecord[]): IndividualOverallScorePoint[] {
+  const counts = new Map(INDIVIDUAL_SCORE_TICKS.map((score) => [score, 0]));
+
+  for (const paper of papers) {
+    for (const score of paper.overallAssessment.values) {
+      if (!Number.isFinite(score) || score < 1 || score > 5) {
+        continue;
+      }
+
+      const normalizedScore = Number(score.toFixed(1));
+      counts.set(normalizedScore, (counts.get(normalizedScore) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .sort(([scoreA], [scoreB]) => scoreA - scoreB)
+    .map(([score, reviewCount]) => ({
+      score,
+      label: score.toFixed(1),
+      reviewCount
+    }));
+}
+
+function roundToNearestHalfStep(score: number) {
+  return Math.max(1, Math.min(5, Math.round(score * 2) / 2));
+}
+
+function buildMetaReviewDistributionData(
+  metaReviewDistribution: AnalyticsInfo["metaReviewDistribution"],
+  papers: PaperRecord[]
+): MetaReviewDistributionPoint[] {
+  const metaReviewCounts = new Map(metaReviewDistribution.map((point) => [point.score, point.count]));
+  const confidenceCounts = new Map(META_REVIEW_SCORE_TICKS.map((score) => [score, 0]));
+
+  for (const paper of papers) {
+    const average = paper.metaReviewConfidence?.average;
+    if (average == null) {
+      continue;
+    }
+
+    const score = roundToNearestHalfStep(average);
+    confidenceCounts.set(score, (confidenceCounts.get(score) ?? 0) + 1);
+  }
+
+  return META_REVIEW_SCORE_TICKS.map((score) => ({
+    score,
+    metaReviewScore: metaReviewCounts.get(score) ?? 0,
+    metaReviewConfidence: confidenceCounts.get(score) ?? 0
+  }));
+}
+
 export default function AnalyticsPanel({ analytics, papers }: AnalyticsPanelProps) {
-  const paperTypeData = buildPaperTypeData(papers);
-  const reviewCountData = buildReviewCountData(papers);
-  const zeroReviewLabel =
-    reviewCountData.find((point) => point.reviewCount === 0)?.tooltipLabel ?? formatPaperShare(0, papers.length);
+  const paperTypeData = useMemo(() => buildPaperTypeData(papers), [papers]);
+  const reviewCountData = useMemo(() => buildReviewCountData(papers), [papers]);
+  const scoreDistributionData = useMemo(
+    () => buildScoreDistributionData(analytics.overallAssessmentHistogram, papers),
+    [analytics.overallAssessmentHistogram, papers]
+  );
+  const individualOverallScoreData = useMemo(() => buildIndividualOverallScoreData(papers), [papers]);
+  const hasIndividualOverallScores = individualOverallScoreData.some((point) => point.reviewCount > 0);
+  const metaReviewDistributionData = useMemo(
+    () => buildMetaReviewDistributionData(analytics.metaReviewDistribution, papers),
+    [analytics.metaReviewDistribution, papers]
+  );
+  const hasMetaReviewScores = metaReviewDistributionData.some((point) => point.metaReviewScore > 0);
+  const hasMetaReviewConfidence = metaReviewDistributionData.some((point) => point.metaReviewConfidence > 0);
+  const zeroReviewLabel = useMemo(
+    () => reviewCountData.find((point) => point.reviewCount === 0)?.tooltipLabel ?? formatPaperShare(0, papers.length),
+    [papers.length, reviewCountData]
+  );
 
   return (
     <>
@@ -230,65 +403,239 @@ export default function AnalyticsPanel({ analytics, papers }: AnalyticsPanelProp
 
         <div className="chart-grid">
           <div className="chart-surface">
-            <h3>Overall assessment distribution</h3>
+            <h3>Overall and reviewer score distributions</h3>
+            <div aria-label="Score series" className="paper-stats-legend score-series-legend">
+              <div className="paper-stats-legend-item">
+                <span
+                  aria-hidden="true"
+                  className="paper-stats-swatch"
+                  style={{ background: SCORE_LINE_COLORS.overallAssessment }}
+                />
+                <span>Overall</span>
+              </div>
+              <div className="paper-stats-legend-item">
+                <span
+                  aria-hidden="true"
+                  className="paper-stats-swatch"
+                  style={{ background: SCORE_LINE_COLORS.excitementScore }}
+                />
+                <span>Excitement</span>
+              </div>
+              <div className="paper-stats-legend-item">
+                <span
+                  aria-hidden="true"
+                  className="paper-stats-swatch"
+                  style={{ background: SCORE_LINE_COLORS.soundnessScore }}
+                />
+                <span>Soundness</span>
+              </div>
+              <div className="paper-stats-legend-item">
+                <span
+                  aria-hidden="true"
+                  className="paper-stats-swatch"
+                  style={{ background: SCORE_LINE_COLORS.reviewerConfidence }}
+                />
+                <span>Confidence</span>
+              </div>
+            </div>
             <div className="chart-frame">
               <ResponsiveContainer height="100%" minWidth={0} width="100%">
-                <LineChart data={analytics.overallAssessmentHistogram}>
+                <LineChart data={scoreDistributionData}>
                   <CartesianGrid stroke="rgba(31, 54, 62, 0.12)" strokeDasharray="3 3" />
                   <XAxis dataKey="label" tickLine={false} />
                   <YAxis allowDecimals={false} tickLine={false} />
-                  <Tooltip />
-                  <Line dataKey="count" name="Papers" stroke="#127a6b" strokeWidth={2.5} type="monotone" />
+                  <Tooltip labelFormatter={formatScoreHistogramTooltipLabel} />
+                  <Line
+                    dataKey="overallAssessment"
+                    name="Overall"
+                    stroke={SCORE_LINE_COLORS.overallAssessment}
+                    strokeWidth={2.5}
+                    type="monotone"
+                  />
+                  <Line
+                    dataKey="excitementScore"
+                    name="Excitement"
+                    stroke={SCORE_LINE_COLORS.excitementScore}
+                    strokeWidth={2.5}
+                    type="monotone"
+                  />
+                  <Line
+                    dataKey="soundnessScore"
+                    name="Soundness"
+                    stroke={SCORE_LINE_COLORS.soundnessScore}
+                    strokeWidth={2.5}
+                    type="monotone"
+                  />
+                  <Line
+                    dataKey="reviewerConfidence"
+                    name="Confidence"
+                    stroke={SCORE_LINE_COLORS.reviewerConfidence}
+                    strokeWidth={2.5}
+                    type="monotone"
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           <div className="chart-surface">
-            <h3>Meta-review score distribution</h3>
-            <div className="chart-frame">
-              <ResponsiveContainer height="100%" minWidth={0} width="100%">
-                <LineChart data={analytics.metaReviewDistribution}>
-                  <CartesianGrid stroke="rgba(31, 54, 62, 0.12)" strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="score"
-                    domain={[1, 5]}
-                    tickFormatter={(value) => Number(value).toFixed(1)}
-                    tickLine={false}
-                    ticks={META_REVIEW_SCORE_TICKS}
-                    type="number"
-                  />
-                  <YAxis allowDecimals={false} tickLine={false} />
-                  <Tooltip />
-                  <Line dataKey="count" name="Meta-reviews" stroke="#a6542f" strokeWidth={2.5} type="monotone" />
-                </LineChart>
-              </ResponsiveContainer>
+            <h3>Individual overall scores</h3>
+            <div aria-label="Individual overall score series" className="paper-stats-legend score-series-legend">
+              <div className="paper-stats-legend-item">
+                <span aria-hidden="true" className="paper-stats-swatch" style={{ background: REVIEW_BAR_COLOR }} />
+                <span>Reviews</span>
+              </div>
             </div>
+            {hasIndividualOverallScores ? (
+              <div className="chart-frame">
+                <ResponsiveContainer height="100%" minWidth={0} width="100%">
+                  <BarChart data={individualOverallScoreData}>
+                    <CartesianGrid stroke="rgba(31, 54, 62, 0.12)" strokeDasharray="3 3" />
+                    <XAxis dataKey="label" name="Overall score" tickLine={false} />
+                    <YAxis allowDecimals={false} name="Reviews" tickLine={false} />
+                    <Tooltip
+                      formatter={(value) => [Number(value), "Reviews"]}
+                      labelFormatter={(value) => `Score: ${value}`}
+                    />
+                    <Bar
+                      dataKey="reviewCount"
+                      fill={REVIEW_BAR_COLOR}
+                      name="Reviews"
+                      radius={[8, 8, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="empty-state inset">
+                <EmptyStateIcon />
+                <h3>No individual overall scores yet.</h3>
+                <p>Reviewer-level overall score counts will appear after completed reviews load.</p>
+              </div>
+            )}
           </div>
-        </div>
 
-        <div className="chart-surface tall">
-          <h3>Meta-review score vs overall assessment</h3>
-          {analytics.pairedScatter.length === 0 ? (
-            <div className="empty-state inset">
-              <EmptyStateIcon />
-              <h3>Not enough paired data yet.</h3>
-              <p>Paired scores will appear after papers have both reviewer averages and meta-review scores.</p>
-            </div>
-          ) : (
-            <div className="chart-frame tall">
-              <ResponsiveContainer height="100%" minWidth={0} width="100%">
-                <ScatterChart>
-                  <CartesianGrid stroke="rgba(31, 54, 62, 0.12)" />
-                  <XAxis dataKey="overallAssessment" name="Overall assessment" tickLine={false} type="number" />
-                  <YAxis dataKey="metaReviewScore" name="Meta-review" tickLine={false} type="number" />
-                  <Tooltip cursor={{ strokeDasharray: "4 4" }} />
-                  <Legend />
-                  <Scatter data={analytics.pairedScatter} fill="#127a6b" name="Papers" />
-                </ScatterChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+          <div className="chart-surface">
+            <h3>Meta-review and confidence score distribution</h3>
+            {hasMetaReviewScores ? (
+              <>
+                <div aria-label="Meta-review series" className="paper-stats-legend score-series-legend">
+                  <div className="paper-stats-legend-item">
+                    <span
+                      aria-hidden="true"
+                      className="paper-stats-swatch"
+                      style={{ background: SCORE_LINE_COLORS.overallAssessment }}
+                    />
+                    <span>Meta-review</span>
+                  </div>
+                  {hasMetaReviewConfidence ? (
+                    <div className="paper-stats-legend-item">
+                      <span
+                        aria-hidden="true"
+                        className="paper-stats-swatch"
+                        style={{ background: SCORE_LINE_COLORS.reviewerConfidence }}
+                      />
+                      <span>Confidence</span>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="chart-frame">
+                  <ResponsiveContainer height="100%" minWidth={0} width="100%">
+                    <LineChart data={metaReviewDistributionData}>
+                      <CartesianGrid stroke="rgba(31, 54, 62, 0.12)" strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="score"
+                        domain={[1, 5]}
+                        tickFormatter={(value) => Number(value).toFixed(1)}
+                        tickLine={false}
+                        ticks={META_REVIEW_SCORE_TICKS}
+                        type="number"
+                      />
+                      <YAxis allowDecimals={false} tickLine={false} />
+                      <Tooltip />
+                      <Line
+                        dataKey="metaReviewScore"
+                        name="Meta-review"
+                        stroke={SCORE_LINE_COLORS.overallAssessment}
+                        strokeWidth={2.5}
+                        type="monotone"
+                      />
+                      {hasMetaReviewConfidence ? (
+                        <Line
+                          dataKey="metaReviewConfidence"
+                          name="Confidence"
+                          stroke={SCORE_LINE_COLORS.reviewerConfidence}
+                          strokeWidth={2.5}
+                          type="monotone"
+                        />
+                      ) : null}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            ) : (
+              <div className="empty-state inset">
+                <EmptyStateIcon />
+                <h3>No meta-review scores yet.</h3>
+                <p>Appears after ACs submit meta-reviews.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="chart-surface">
+            <h3>Meta-review score vs overall assessment</h3>
+            {analytics.pairedScatter.length === 0 ? (
+              <div className="empty-state inset">
+                <EmptyStateIcon />
+                <h3>Not enough paired data yet.</h3>
+                <p>Appears after both reviewer averages and meta-reviews exist.</p>
+              </div>
+            ) : (
+              <>
+                <div aria-label="Paired score series" className="paper-stats-legend score-series-legend">
+                  <div className="paper-stats-legend-item">
+                    <span
+                      aria-hidden="true"
+                      className="paper-stats-swatch"
+                      style={{ background: SCORE_LINE_COLORS.overallAssessment }}
+                    />
+                    <span>Paired scores</span>
+                  </div>
+                </div>
+                <div className="chart-frame">
+                  <ResponsiveContainer height="100%" minWidth={0} width="100%">
+                    <ScatterChart>
+                      <CartesianGrid stroke="rgba(31, 54, 62, 0.12)" strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="overallAssessment"
+                        domain={[1, 5]}
+                        name="Overall assessment"
+                        tickFormatter={(value) => Number(value).toFixed(1)}
+                        tickLine={false}
+                        ticks={META_REVIEW_SCORE_TICKS}
+                        type="number"
+                      />
+                      <YAxis
+                        dataKey="metaReviewScore"
+                        domain={[1, 5]}
+                        name="Meta-review"
+                        tickFormatter={(value) => Number(value).toFixed(1)}
+                        tickLine={false}
+                        ticks={META_REVIEW_SCORE_TICKS}
+                        type="number"
+                      />
+                      <Tooltip cursor={{ strokeDasharray: "4 4" }} />
+                      <Scatter
+                        data={analytics.pairedScatter}
+                        fill={SCORE_LINE_COLORS.overallAssessment}
+                        name="Paired scores"
+                      />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </section>
     </>

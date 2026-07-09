@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import faulthandler
 import logging
+import os
 import platform
 import time
 from typing import Optional
@@ -24,6 +25,25 @@ logger = logging.getLogger(__name__)
 faulthandler.enable()
 
 
+def configured_cors_origins() -> list[str]:
+    web_host = os.getenv("ARR_SAC_WEB_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    web_port = os.getenv("ARR_SAC_WEB_PORT", "8000").strip() or "8000"
+    origins = {
+        f"http://127.0.0.1:{web_port}",
+        f"http://localhost:{web_port}",
+    }
+
+    if web_host not in {"0.0.0.0", "127.0.0.1", "localhost"}:
+        origins.add(f"http://{web_host}:{web_port}")
+
+    for origin in os.getenv("ARR_SAC_CORS_ORIGINS", "").split(","):
+        normalized_origin = origin.strip().rstrip("/")
+        if normalized_origin:
+            origins.add(normalized_origin)
+
+    return sorted(origins)
+
+
 def create_app(
     gateway: Optional[OpenReviewGateway] = None,
     session_store: Optional[SessionStore] = None,
@@ -34,10 +54,7 @@ def create_app(
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:8000",
-            "http://localhost:8000",
-        ],
+        allow_origins=configured_cors_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -98,32 +115,6 @@ def create_app(
         if session is None:
             raise HTTPException(status_code=401, detail="Session expired.")
 
-        if not refresh:
-            cached = app.state.sessions.get_cached_dashboard(session_id, venueId)
-            if cached is not None:
-                logger.warning(
-                    "Dashboard request served from cache in %.2fs for venue %s: papers=%s withdrawn=%s comments=%s",
-                    time.perf_counter() - request_started_at,
-                    venueId,
-                    len(cached.papers),
-                    len(cached.withdrawnPapers),
-                    cached.summary.commentsCount,
-                )
-                app.state.sessions.set_progress(
-                    session_id,
-                    venueId,
-                    DashboardLoadProgress(
-                        venueId=venueId,
-                        loadId=loadId,
-                        phase="ready",
-                        message="Loaded cached workspace.",
-                        current=len(cached.papers),
-                        total=len(cached.papers),
-                        done=True,
-                    ),
-                )
-                return cached
-
         def set_progress(
             phase: str,
             message: str,
@@ -147,53 +138,123 @@ def create_app(
                 ),
             )
 
-        set_progress("venue", "Starting venue load...", 0, 0)
+        if not refresh:
+            cached = app.state.sessions.get_cached_dashboard(session_id, venueId)
+            if cached is not None:
+                logger.warning(
+                    "Dashboard request served from cache in %.2fs for venue %s: papers=%s withdrawn=%s comments=%s",
+                    time.perf_counter() - request_started_at,
+                    venueId,
+                    len(cached.papers),
+                    len(cached.withdrawnPapers),
+                    cached.summary.commentsCount,
+                )
+                set_progress(
+                    "ready",
+                    "Loaded cached workspace.",
+                    len(cached.papers),
+                    len(cached.papers),
+                    done=True,
+                )
+                return cached
 
-        try:
-            snapshot = app.state.gateway.fetch_dashboard_snapshot(
-                session.client,
+        owns_load, dashboard_load = app.state.sessions.begin_dashboard_load(session_id, venueId)
+        if not owns_load:
+            if dashboard_load is None:
+                raise HTTPException(status_code=401, detail="Session expired.")
+
+            logger.warning(
+                "Dashboard request waiting for in-flight load for venue %s after %.2fs",
                 venueId,
-                progress_callback=set_progress,
+                time.time() - dashboard_load.started_at,
             )
-        except DashboardFetchError as exc:
-            set_progress("error", str(exc), 0, 0, done=True, error=str(exc))
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            dashboard_load.event.wait()
+
+            cached = app.state.sessions.get_cached_dashboard(session_id, venueId)
+            if cached is not None:
+                set_progress(
+                    "ready",
+                    "Loaded workspace from a refresh that was already running.",
+                    len(cached.papers),
+                    len(cached.papers),
+                    done=True,
+                )
+                logger.warning(
+                    "Dashboard request reused in-flight load in %.2fs for venue %s: papers=%s withdrawn=%s comments=%s",
+                    time.perf_counter() - request_started_at,
+                    venueId,
+                    len(cached.papers),
+                    len(cached.withdrawnPapers),
+                    cached.summary.commentsCount,
+                )
+                return cached
+
+            message = dashboard_load.error or "The dashboard refresh did not complete."
+            set_progress("error", message, 0, 0, done=True, error=message)
+            raise HTTPException(status_code=dashboard_load.status_code, detail=message)
+
+        set_progress("venue", "Starting venue load...", 0, 0)
+        load_error: str | None = None
+        load_error_status = 500
 
         try:
-            logger.warning("Building dashboard response for venue %s", venueId)
-            payload = build_dashboard_response(snapshot, venueId, progress_callback=set_progress)
-            logger.warning("Built dashboard response for venue %s", venueId)
-        except Exception as exc:
-            logger.exception("Unhandled dashboard build error for venue %s", venueId)
-            detail = "The dashboard could not be built from the OpenReview response."
-            set_progress("error", detail, 0, 0, done=True, error=detail)
-            raise HTTPException(
-                status_code=500,
-                detail=detail,
-            ) from exc
+            try:
+                snapshot = app.state.gateway.fetch_dashboard_snapshot(
+                    session.client,
+                    venueId,
+                    progress_callback=set_progress,
+                )
+            except DashboardFetchError as exc:
+                load_error = str(exc)
+                load_error_status = 400
+                set_progress("error", load_error, 0, 0, done=True, error=load_error)
+                raise HTTPException(status_code=400, detail=load_error) from exc
 
-        app.state.sessions.cache_dashboard(session_id, venueId, payload)
-        set_progress(
-            "ready",
-            f"Loaded {len(payload.papers)} papers for this SAC batch.",
-            len(payload.papers),
-            len(payload.papers),
-            done=True,
-        )
-        logger.warning(
-            (
-                "Dashboard request completed in %.2fs for venue %s: "
-                "papers=%s withdrawn=%s area_chairs=%s comments=%s refresh=%s"
-            ),
-            time.perf_counter() - request_started_at,
-            venueId,
-            len(payload.papers),
-            len(payload.withdrawnPapers),
-            len(payload.areaChairs),
-            payload.summary.commentsCount,
-            refresh,
-        )
-        return payload
+            try:
+                logger.warning("Building dashboard response for venue %s", venueId)
+                payload = build_dashboard_response(snapshot, venueId, progress_callback=set_progress)
+                logger.warning("Built dashboard response for venue %s", venueId)
+            except Exception as exc:
+                logger.exception("Unhandled dashboard build error for venue %s", venueId)
+                load_error = "The dashboard could not be built from the OpenReview response."
+                load_error_status = 500
+                set_progress("error", load_error, 0, 0, done=True, error=load_error)
+                raise HTTPException(
+                    status_code=500,
+                    detail=load_error,
+                ) from exc
+
+            app.state.sessions.cache_dashboard(session_id, venueId, payload)
+            set_progress(
+                "ready",
+                f"Loaded {len(payload.papers)} papers for this SAC batch.",
+                len(payload.papers),
+                len(payload.papers),
+                done=True,
+            )
+            logger.warning(
+                (
+                    "Dashboard request completed in %.2fs for venue %s: "
+                    "papers=%s withdrawn=%s area_chairs=%s comments=%s refresh=%s"
+                ),
+                time.perf_counter() - request_started_at,
+                venueId,
+                len(payload.papers),
+                len(payload.withdrawnPapers),
+                len(payload.areaChairs),
+                payload.summary.commentsCount,
+                refresh,
+            )
+            return payload
+        finally:
+            if dashboard_load is not None:
+                app.state.sessions.finish_dashboard_load(
+                    session_id,
+                    venueId,
+                    dashboard_load,
+                    error=load_error,
+                    status_code=load_error_status,
+                )
 
     @app.get("/api/dashboard/progress", response_model=DashboardLoadProgress)
     def dashboard_progress(

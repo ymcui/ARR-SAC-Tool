@@ -1,20 +1,30 @@
 "use client";
 
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { EmptyStateIcon } from "@/components/empty-state-icon";
-import type { CommentGroup, CommentRecord } from "@/lib/types";
+import { formatScoreSummary } from "@/lib/format";
+import type { CommentGroup, CommentRecord, PaperRecord } from "@/lib/types";
 
 type CommentsPanelProps = {
   comments: CommentGroup[];
+  papers?: PaperRecord[];
 };
 
 type CommentFilters = {
   search: string;
   type: string;
+};
+
+type CommentTypeBreakdown = [string, number][];
+type DisplayCommentGroup = CommentGroup & {
+  displayTitle: string;
+  overallScoreLabel: string | null;
+  postCount: number;
+  typeBreakdown: CommentTypeBreakdown;
 };
 
 function filterNodes(nodes: CommentRecord[], filters: CommentFilters): CommentRecord[] {
@@ -104,23 +114,40 @@ function formatPostCount(count: number) {
   return `${count} ${count === 1 ? "post" : "posts"}`;
 }
 
-export function CommentsPanel({ comments }: CommentsPanelProps) {
+export function CommentsPanel({ comments, papers = [] }: CommentsPanelProps) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(() => new Set());
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
-  const types = [...new Set(comments.flatMap((group) => group.items.flatMap(flattenTypes)))].sort();
+  const paperById = useMemo(() => new Map(papers.map((paper) => [paper.paperId, paper])), [papers]);
 
-  const filteredGroups = comments
-    .map((group) => ({
-      ...group,
-      items: filterNodes(group.items, {
-        search: deferredSearch,
-        type: typeFilter
-      })
-    }))
-    .filter((group) => group.items.length > 0);
+  const types = useMemo(
+    () => [...new Set(comments.flatMap((group) => group.items.flatMap(flattenTypes)))].sort(),
+    [comments]
+  );
+
+  const filteredGroups = useMemo<DisplayCommentGroup[]>(
+    () =>
+      comments
+        .map((group) => {
+          const paper = paperById.get(group.paperId);
+          const items = filterNodes(group.items, {
+            search: deferredSearch,
+            type: typeFilter
+          });
+          return {
+            ...group,
+            displayTitle: (group.paperTitle || "").trim() || `Paper ${group.paperNumber}`,
+            overallScoreLabel: paper ? `Overall ${formatScoreSummary(paper.overallAssessment)}` : null,
+            items,
+            postCount: countComments(items),
+            typeBreakdown: countCommentTypes(items)
+          };
+        })
+        .filter((group) => group.items.length > 0),
+    [comments, deferredSearch, paperById, typeFilter]
+  );
 
   const isEmptyDataset = comments.length === 0;
 
@@ -189,24 +216,26 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
       <div className="comment-groups">
         {filteredGroups.map((group) => {
           const expanded = expandedPaperIds.has(group.paperId);
-          const postCount = countComments(group.items);
-          const typeBreakdown = countCommentTypes(group.items);
-          const displayTitle = (group.paperTitle || "").trim() || `Paper ${group.paperNumber}`;
 
           return (
             <section className="paper-thread" key={group.paperId}>
               <button
-                aria-label={`Paper ${group.paperNumber} ${displayTitle} ${formatPostCount(postCount)}`}
+                aria-label={`Paper ${group.paperNumber} ${group.displayTitle} ${formatPostCount(group.postCount)}`}
                 aria-expanded={expanded}
                 className="paper-thread-header paper-thread-toggle"
                 onClick={() => togglePaperThread(group.paperId)}
                 type="button"
               >
                 <div>
-                  <p className="eyebrow">Paper {group.paperNumber}</p>
-                  <h3 className="paper-thread-title">{displayTitle}</h3>
+                  <p className="eyebrow paper-thread-eyebrow">
+                    <span>Paper {group.paperNumber}</span>
+                    {group.overallScoreLabel ? (
+                      <span className="paper-thread-score-context">{group.overallScoreLabel}</span>
+                    ) : null}
+                  </p>
+                  <h3 className="paper-thread-title">{group.displayTitle}</h3>
                   <span className="paper-thread-breakdown" aria-label="Comment type breakdown">
-                    {typeBreakdown.map(([type, count]) => (
+                    {group.typeBreakdown.map(([type, count]) => (
                       <span
                         className={`paper-thread-breakdown-item ${commentTypeClassName(type)}`}
                         key={type}
@@ -217,7 +246,7 @@ export function CommentsPanel({ comments }: CommentsPanelProps) {
                   </span>
                 </div>
                 <span className="paper-thread-summary">
-                  <span>{formatPostCount(postCount)}</span>
+                  <span>{formatPostCount(group.postCount)}</span>
                   <span aria-hidden="true" className="paper-thread-caret">
                     {expanded ? "↑" : "↓"}
                   </span>

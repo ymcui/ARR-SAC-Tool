@@ -15,6 +15,7 @@ OPENREVIEW_BASE_URL = "https://api2.openreview.net"
 OPENREVIEW_FORUM_URL = "https://openreview.net/forum?id={paper_id}"
 ARR_STAGE_PREFIX = "aclweb.org/ACL/ARR"
 MAX_COMMITMENT_LOAD_WORKERS = 8
+MAX_AREA_CHAIR_CONTACT_WORKERS = 8
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str, str, int, int], None]
 
@@ -107,6 +108,34 @@ def _resolve_bulk_group_members(group: Any, groups_by_id: Dict[str, Any]) -> tup
             resolved_members.append(resolved_member)
 
     return resolved_members, not missing_anon_member
+
+
+def _resolve_group_members(
+    client: Any,
+    group_ids: Iterable[str],
+    groups_by_id: Dict[str, Any] | None = None,
+    *,
+    continue_on_empty: bool = False,
+) -> List[str]:
+    groups_by_id = groups_by_id or {}
+    for group_id in group_ids:
+        group = groups_by_id.get(group_id)
+        if group is not None:
+            members, fully_resolved = _resolve_bulk_group_members(group, groups_by_id)
+            if fully_resolved:
+                if members or not continue_on_empty:
+                    return members
+                continue
+            logger.debug("Bulk group %s had unresolved anonymous members; falling back", group_id)
+
+        try:
+            members = list(client.get_group(group_id).members)
+        except Exception:
+            continue
+        if members or not continue_on_empty:
+            return members
+
+    return []
 
 
 def _profile_content(profile: Any) -> Dict[str, Any]:
@@ -290,15 +319,29 @@ def _area_chair_contacts(
 
     started_at = time.perf_counter()
     preferred_email_by_profile_id = _preferred_email_edges(client, preferred_emails_invitation_id)
-    contacts = {
-        area_chair_id: _lookup_area_chair_contact(client, area_chair_id, preferred_email_by_profile_id)
-        for area_chair_id in area_chair_ids
-    }
+    contacts: Dict[str, Dict[str, str]] = {}
+    max_workers = min(MAX_AREA_CHAIR_CONTACT_WORKERS, len(area_chair_ids))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_area_chair_id = {
+            executor.submit(
+                _lookup_area_chair_contact,
+                client,
+                area_chair_id,
+                preferred_email_by_profile_id,
+            ): area_chair_id
+            for area_chair_id in area_chair_ids
+        }
+        for future in as_completed(future_to_area_chair_id):
+            area_chair_id = future_to_area_chair_id[future]
+            contacts[area_chair_id] = future.result()
+
+    contacts = {area_chair_id: contacts[area_chair_id] for area_chair_id in area_chair_ids}
     logger.warning(
-        "Dashboard load phase area_chair_contacts completed in %.2fs: profiles=%s emails=%s",
+        "Dashboard load phase area_chair_contacts completed in %.2fs: profiles=%s emails=%s workers=%s",
         time.perf_counter() - started_at,
         len(contacts),
         sum(1 for contact in contacts.values() if contact.get("email")),
+        max_workers,
     )
     return contacts
 
@@ -840,6 +883,26 @@ class OpenReviewGateway:
                 }
             )
 
+        commitment_groups_by_id: Dict[str, Any] = {}
+        if commitment_candidates:
+            phase_started_at = time.perf_counter()
+            try:
+                commitment_groups = client.get_all_groups(prefix=venue_id)
+                commitment_groups_by_id = {group.id: group for group in commitment_groups}
+                logger.warning(
+                    "Dashboard load phase commitment_groups completed in %.2fs for %s: groups=%s",
+                    time.perf_counter() - phase_started_at,
+                    viewer_id,
+                    len(commitment_groups_by_id),
+                )
+            except Exception:
+                logger.warning(
+                    "Dashboard load phase commitment_groups failed in %.2fs for %s; falling back to per-paper group lookups",
+                    time.perf_counter() - phase_started_at,
+                    viewer_id,
+                    exc_info=True,
+                )
+
         def load_commitment_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
             batch_note = candidate["batch_note"]
             batch_readers = candidate["batch_readers"]
@@ -886,12 +949,14 @@ class OpenReviewGateway:
                 forum_note=forum_note,
                 venue_id=venue_id,
                 submission_name=submission_name,
+                groups_by_id=commitment_groups_by_id,
             )
             reviewers = self._commitment_reviewers(
                 client=client,
                 forum_note=forum_note,
                 venue_id=venue_id,
                 submission_name=submission_name,
+                groups_by_id=commitment_groups_by_id,
             )
 
             return {
@@ -999,6 +1064,7 @@ class OpenReviewGateway:
         forum_note: Any,
         venue_id: str,
         submission_name: str,
+        groups_by_id: Dict[str, Any] | None = None,
     ) -> str:
         batch_content = getattr(batch_note, "content", {}) or {}
         content_area_chair = _first_content_value(batch_content, ("area_chair", "Area Chair", "area chair"))
@@ -1009,17 +1075,18 @@ class OpenReviewGateway:
         if not paper_number:
             return ""
 
-        for group_id in (
-            f"{venue_id}/{submission_name}{paper_number}/Area_Chairs",
-            f"{venue_id}/Submission{paper_number}/Area_Chairs",
-            f"{venue_id}/Paper{paper_number}/Area_Chairs",
-        ):
-            try:
-                members = list(client.get_group(group_id).members)
-            except Exception:
-                continue
-            if members:
-                return members[0]
+        members = _resolve_group_members(
+            client,
+            (
+                f"{venue_id}/{submission_name}{paper_number}/Area_Chairs",
+                f"{venue_id}/Submission{paper_number}/Area_Chairs",
+                f"{venue_id}/Paper{paper_number}/Area_Chairs",
+            ),
+            groups_by_id,
+            continue_on_empty=True,
+        )
+        if members:
+            return members[0]
 
         return ""
 
@@ -1029,19 +1096,18 @@ class OpenReviewGateway:
         forum_note: Any,
         venue_id: str,
         submission_name: str,
+        groups_by_id: Dict[str, Any] | None = None,
     ) -> List[str]:
         paper_number = _safe_note_number(forum_note)
         if not paper_number:
             return []
 
-        for group_id in (
-            f"{venue_id}/{submission_name}{paper_number}/Reviewers",
-            f"{venue_id}/Submission{paper_number}/Reviewers",
-            f"{venue_id}/Paper{paper_number}/Reviewers",
-        ):
-            try:
-                return list(client.get_group(group_id).members)
-            except Exception:
-                continue
-
-        return []
+        return _resolve_group_members(
+            client,
+            (
+                f"{venue_id}/{submission_name}{paper_number}/Reviewers",
+                f"{venue_id}/Submission{paper_number}/Reviewers",
+                f"{venue_id}/Paper{paper_number}/Reviewers",
+            ),
+            groups_by_id,
+        )

@@ -249,6 +249,7 @@ def _build_paper_record(submission: Dict[str, Any], area_chair: str) -> PaperRec
     excitement_scores: List[float] = []
     overall_scores: List[float] = []
     meta_review_score: Optional[float] = None
+    meta_review_confidence: Optional[float] = None
     author_responses = 0
     has_ac_checklist = False
     has_confidential = False
@@ -270,6 +271,12 @@ def _build_paper_record(submission: Dict[str, Any], area_chair: str) -> PaperRec
             meta_review_score = _first_number(
                 reply.get("content", {}),
                 ["overall_assessment", "overall_rating", "score"],
+            )
+
+        if meta_review_confidence is None and _is_meta_review(reply):
+            meta_review_confidence = _first_number(
+                reply.get("content", {}),
+                ["confidence", "Confidence", "confidence_score", "meta_review_confidence", "metareview_confidence"],
             )
 
         if not meta_review_text and _is_meta_review(reply):
@@ -323,6 +330,9 @@ def _build_paper_record(submission: Dict[str, Any], area_chair: str) -> PaperRec
         excitementScore=_score_summary(excitement_scores),
         overallAssessment=_score_summary(overall_scores),
         metaReviewScore=meta_review_score,
+        metaReviewConfidence=_score_summary(
+            [meta_review_confidence] if meta_review_confidence is not None else []
+        ),
         metaReviewText=meta_review_text,
         responseToMetaReview=_first_content_text(
             content,

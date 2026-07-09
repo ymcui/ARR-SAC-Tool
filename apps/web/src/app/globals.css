@@ -1530,6 +1530,23 @@ select {
   padding: 0.14rem 0.28rem;
 }
 
+.paper-thread-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.paper-thread-score-context {
+  border-left: 1px solid rgba(87, 112, 170, 0.24);
+  padding-left: 0.65rem;
+  color: #5f6f93;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .paper-thread-title {
   max-width: 68rem;
 }
@@ -1731,11 +1748,11 @@ select {
   grid-template-columns: minmax(17rem, 1fr) minmax(12.5rem, max-content);
   gap: 1.1rem;
   align-items: center;
-  min-height: 320px;
+  min-height: 290px;
 }
 
 .paper-type-chart-body .chart-frame {
-  height: 320px;
+  height: 290px;
 }
 
 .paper-stats-legend {
@@ -1769,6 +1786,12 @@ select {
   height: 0.72rem;
   flex: 0 0 auto;
   border-radius: 999px;
+}
+
+.score-series-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
 }
 
 @media (max-width: 1200px) {

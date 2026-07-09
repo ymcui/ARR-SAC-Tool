@@ -33,8 +33,15 @@ const RECENT_VENUES_STORAGE_KEY = "arr-sac-dashboard.recent-venues";
 const DEFAULT_VENUE_ID = "aclweb.org/ACL/ARR/2026/March";
 const ARR_STAGE_PREFIX = "aclweb.org/ACL/ARR";
 const MAX_RECENT_VENUES = 8;
-const REFRESH_RECOVERY_TIMEOUT_MS = 120000;
-const REFRESH_RECOVERY_POLL_MS = 1000;
+const DASHBOARD_RECOVERY_TIMEOUT_MS = 120000;
+const DASHBOARD_RECOVERY_POLL_MS = 1000;
+const DASHBOARD_RECOVERY_PROBE_TIMEOUT_MS = 4000;
+const DASHBOARD_RECOVERY_GUIDANCE =
+  "Try Load / Refresh again. If it fails again, refresh this page and sign in again if prompted. If the app is running locally, make sure npm run dev is still running.";
+const DEFAULT_LOCAL_API_PORT = "8001";
+const DEFAULT_LOCAL_WEB_PORT = "8000";
+const BUILD_API_ORIGIN = process.env.NEXT_PUBLIC_ARR_SAC_API_ORIGIN?.replace(/\/$/, "");
+const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost"]);
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "papers", label: "Papers" },
@@ -49,8 +56,45 @@ async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-function apiUrl(path: string): string {
-  return path;
+function normalizeLocalApiOrigin(origin: string, browserHostname: string): string | null {
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    if (
+      url.hostname === "0.0.0.0" ||
+      (LOCAL_HOSTNAMES.has(url.hostname) && LOCAL_HOSTNAMES.has(browserHostname))
+    ) {
+      url.hostname = browserHostname;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+function localApiOrigin(configuredApiOrigin?: string): string | null {
+  if (typeof window === "undefined" || !LOCAL_HOSTNAMES.has(window.location.hostname)) {
+    return null;
+  }
+
+  if (configuredApiOrigin) {
+    return normalizeLocalApiOrigin(configuredApiOrigin.replace(/\/$/, ""), window.location.hostname);
+  }
+
+  if (window.location.port === DEFAULT_LOCAL_WEB_PORT) {
+    return `${window.location.protocol}//${window.location.hostname}:${DEFAULT_LOCAL_API_PORT}`;
+  }
+
+  return null;
+}
+
+function apiUrl(path: string, configuredApiOrigin?: string): string {
+  const origin = localApiOrigin(configuredApiOrigin ?? BUILD_API_ORIGIN);
+  return origin ? `${origin}${path}` : path;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -63,6 +107,31 @@ function createLoadId(): string {
   }
 
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function formatDashboardErrorMessage(message: string): string {
+  const trimmedMessage = message.trim();
+  const normalizedMessage = trimmedMessage.toLowerCase();
+
+  if (!trimmedMessage) {
+    return `The dashboard could not be loaded. ${DASHBOARD_RECOVERY_GUIDANCE}`;
+  }
+
+  if (
+    trimmedMessage === "The string did not match the expected pattern." ||
+    normalizedMessage.includes("failed to fetch") ||
+    normalizedMessage.includes("load failed") ||
+    normalizedMessage.includes("networkerror") ||
+    normalizedMessage.includes("could not reach the local api proxy")
+  ) {
+    return `The dashboard connection was interrupted before data could be loaded. ${DASHBOARD_RECOVERY_GUIDANCE}`;
+  }
+
+  if (normalizedMessage.includes("is still running")) {
+    return `${trimmedMessage} If it keeps happening, refresh this page and sign in again if prompted.`;
+  }
+
+  return trimmedMessage;
 }
 
 function getVenueStage(venueId: string): VenueStage {
@@ -121,7 +190,7 @@ function addRecentVenueId(venueId: string, recentVenueIds: string[]): string[] {
   return nextVenueIds;
 }
 
-export function DashboardShell() {
+export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: string } = {}) {
   const [viewer, setViewer] = useState<ViewerInfo | null>(null);
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [venueId, setVenueId] = useState(DEFAULT_VENUE_ID);
@@ -171,7 +240,7 @@ export function DashboardShell() {
 
   async function fetchProgressSnapshot(nextVenueId: string): Promise<DashboardLoadProgress | null> {
     const response = await fetch(
-      apiUrl(`/api/dashboard/progress?venueId=${encodeURIComponent(nextVenueId)}`),
+      apiUrl(`/api/dashboard/progress?venueId=${encodeURIComponent(nextVenueId)}`, configuredApiOrigin),
       { credentials: "include" }
     );
 
@@ -251,7 +320,10 @@ export function DashboardShell() {
   async function requestCachedDashboard(trimmedVenueId: string, loadId?: string): Promise<DashboardResponse | null> {
     const loadIdQuery = loadId ? `&loadId=${encodeURIComponent(loadId)}` : "";
     const response = await fetch(
-      apiUrl(`/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=0${loadIdQuery}`),
+      apiUrl(
+        `/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=0${loadIdQuery}`,
+        configuredApiOrigin
+      ),
       { credentials: "include" }
     );
 
@@ -270,13 +342,47 @@ export function DashboardShell() {
     return parseJson<DashboardResponse>(response);
   }
 
-  async function recoverCompletedRefresh(trimmedVenueId: string, loadId: string): Promise<DashboardResponse | null> {
-    const deadline = Date.now() + REFRESH_RECOVERY_TIMEOUT_MS;
+  async function recoverCompletedDashboardLoad(
+    trimmedVenueId: string,
+    loadId: string,
+    refresh: boolean
+  ): Promise<DashboardResponse | null> {
+    const recoveryLabel = refresh ? "Refresh" : "Load";
+    const probeDeadline = Date.now() + DASHBOARD_RECOVERY_PROBE_TIMEOUT_MS;
+    let sawCurrentProgress = false;
+
+    while (Date.now() < probeDeadline) {
+      const progress = await fetchProgressSnapshot(trimmedVenueId);
+      if (progress && isCurrentProgress(progress, loadId)) {
+        sawCurrentProgress = true;
+        setLoadProgress(progress);
+
+        if (progress.error) {
+          throw new Error(progress.error);
+        }
+
+        if (progress.done) {
+          return requestCachedDashboard(trimmedVenueId, loadId);
+        }
+
+        break;
+      }
+
+      await sleep(DASHBOARD_RECOVERY_POLL_MS);
+    }
+
+    if (!sawCurrentProgress) {
+      throw new Error(
+        "The dashboard request could not reach the local API proxy. Make sure the dev server is still running, then try again."
+      );
+    }
+
+    const deadline = Date.now() + DASHBOARD_RECOVERY_TIMEOUT_MS;
     setLoadProgress({
       venueId: trimmedVenueId,
       loadId,
       phase: "submissions",
-      message: "Refresh is still finishing. Waiting for the updated cache...",
+      message: `${recoveryLabel} is still finishing. Waiting for the updated cache...`,
       current: 0,
       total: 0,
       done: false,
@@ -297,10 +403,10 @@ export function DashboardShell() {
         }
       }
 
-      await sleep(REFRESH_RECOVERY_POLL_MS);
+      await sleep(DASHBOARD_RECOVERY_POLL_MS);
     }
 
-    throw new Error("Refresh is still running. Try Load / Refresh again in a moment.");
+    throw new Error(`${recoveryLabel} is still running. Try Load / Refresh again in a moment.`);
   }
 
   async function requestDashboard(nextVenueId: string, refresh: boolean) {
@@ -320,7 +426,8 @@ export function DashboardShell() {
     try {
       const response = await fetch(
         apiUrl(
-          `/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=${refresh ? "1" : "0"}&loadId=${encodeURIComponent(loadId)}`
+          `/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=${refresh ? "1" : "0"}&loadId=${encodeURIComponent(loadId)}`,
+          configuredApiOrigin
         ),
         { credentials: "include" }
       );
@@ -343,11 +450,11 @@ export function DashboardShell() {
     } catch (nextError) {
       let message = nextError instanceof Error ? nextError.message : "Unexpected dashboard error.";
 
-      if (refresh && !receivedDashboardResponse) {
+      if (!receivedDashboardResponse) {
         stopProgressPolling();
 
         try {
-          const recoveredPayload = await recoverCompletedRefresh(trimmedVenueId, loadId);
+          const recoveredPayload = await recoverCompletedDashboardLoad(trimmedVenueId, loadId, refresh);
           if (!recoveredPayload) {
             return;
           }
@@ -355,7 +462,9 @@ export function DashboardShell() {
           applyDashboardPayload(
             recoveredPayload,
             trimmedVenueId,
-            "Loaded refreshed data after the local connection recovered."
+            refresh
+              ? "Loaded refreshed data after the local connection recovered."
+              : "Loaded data after the local connection recovered."
           );
           return;
         } catch (recoveryError) {
@@ -363,15 +472,17 @@ export function DashboardShell() {
         }
       }
 
-      setDashboardError(message);
+      const progressMessage = message.trim() || "Unexpected dashboard error.";
+      const dashboardMessage = formatDashboardErrorMessage(message);
+      setDashboardError(dashboardMessage);
       setLoadProgress({
         venueId: trimmedVenueId,
         phase: "error",
-        message,
+        message: progressMessage,
         current: 0,
         total: 0,
         done: true,
-        error: message
+        error: progressMessage
       });
     } finally {
       stopProgressPolling();
@@ -389,7 +500,7 @@ export function DashboardShell() {
     setAuthError(null);
 
     try {
-      const response = await fetch(apiUrl("/api/session/login"), {
+      const response = await fetch(apiUrl("/api/session/login", configuredApiOrigin), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -417,7 +528,7 @@ export function DashboardShell() {
   }
 
   async function handleLogout() {
-    await fetch(apiUrl("/api/session/logout"), {
+    await fetch(apiUrl("/api/session/logout", configuredApiOrigin), {
       method: "POST",
       credentials: "include"
     }).catch(() => undefined);
@@ -435,7 +546,7 @@ export function DashboardShell() {
 
     try {
       const response = await fetch(
-        apiUrl(`/api/dashboard/export?venueId=${encodeURIComponent(dashboard.venue.venueId)}`),
+        apiUrl(`/api/dashboard/export?venueId=${encodeURIComponent(dashboard.venue.venueId)}`, configuredApiOrigin),
         { credentials: "include" }
       );
 
@@ -559,7 +670,9 @@ export function DashboardShell() {
                     papers={dashboard.papers}
                   />
                 ) : null}
-                {selectedTab === "comments" ? <CommentsPanel comments={dashboard.comments} /> : null}
+                {selectedTab === "comments" ? (
+                  <CommentsPanel comments={dashboard.comments} papers={dashboard.papers} />
+                ) : null}
                 {selectedTab === "analytics" ? (
                   <AnalyticsPanel analytics={dashboard.analytics} papers={dashboard.papers} />
                 ) : null}

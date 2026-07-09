@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useDeferredValue, useState } from "react";
+import { Fragment, useDeferredValue, useMemo, useState } from "react";
 
 import { TableBooleanIcon } from "@/components/table-boolean-icon";
 import { formatCountPair, formatScore, formatScoreSummary, joinClasses } from "@/lib/format";
@@ -250,128 +250,140 @@ export function PapersPanel({
 
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const isCommitmentStage = venueStage === "Commitment Stage";
-  const sortDefinitions = isCommitmentStage ? COMMITMENT_SORT_DEFINITIONS : ARR_SORT_DEFINITIONS;
+  const sortDefinitions = useMemo(
+    () => (isCommitmentStage ? COMMITMENT_SORT_DEFINITIONS : ARR_SORT_DEFINITIONS),
+    [isCommitmentStage]
+  );
   const activeSortColumn = sortDefinitions.some((definition) => definition.column === sortColumn)
     ? sortColumn
     : "paperNumber";
   const tableColumnCount = sortDefinitions.length;
 
-  const filteredPapers = [...papers]
-    .filter((paper) => {
-      if (!deferredSearch) {
-        return true;
-      }
+  const filteredPapers = useMemo(
+    () =>
+      [...papers]
+        .filter((paper) => {
+          if (!deferredSearch) {
+            return true;
+          }
 
-      const searchSpace = [paper.paperNumber, paper.paperId, paper.paperTitle, paper.areaChair, paper.paperType]
-        .join(" ")
-        .toLowerCase();
+          const searchSpace = [paper.paperNumber, paper.paperId, paper.paperTitle, paper.areaChair, paper.paperType]
+            .join(" ")
+            .toLowerCase();
 
-      return searchSpace.includes(deferredSearch);
-    })
-    .sort((left, right) => {
-      switch (activeSortColumn) {
-        case "paperNumber":
-          return sortDirection === "asc"
-            ? left.paperNumber - right.paperNumber
-            : right.paperNumber - left.paperNumber;
-        case "areaChair":
-          return (
-            compareText(left.areaChair, right.areaChair, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "paperType":
-          return (
-            compareText(left.paperType || "", right.paperType || "", sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "reviews":
-          return (
-            compareReviewProgress(
-              left.completedReviews,
-              left.expectedReviews,
-              right.completedReviews,
-              right.expectedReviews,
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        case "readyForRebuttal":
-          return (
-            compareBoolean(left.readyForRebuttal, right.readyForRebuttal, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "authorResponseReady":
-          return (
-            compareBoolean(left.authorResponseReady, right.authorResponseReady, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "acChecklistReady":
-          return (
-            compareBoolean(left.acChecklistReady, right.acChecklistReady, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "resubmission":
-          return (
-            compareBoolean(left.resubmission, right.resubmission, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "preprint":
-          return (
-            compareBoolean(left.preprint, right.preprint, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "hasConfidential":
-          return (
-            compareBoolean(left.hasConfidential, right.hasConfidential, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "issueReport":
-          return (
-            compareBoolean(left.issueReport, right.issueReport, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "reviewerConfidence":
-          return (
-            compareNullableNumber(
-              left.reviewerConfidence.average,
-              right.reviewerConfidence.average,
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        case "soundnessScore":
-          return (
-            compareNullableNumber(left.soundnessScore.average, right.soundnessScore.average, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "excitementScore":
-          return (
-            compareNullableNumber(
-              left.excitementScore.average,
-              right.excitementScore.average,
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        case "metaReviewScore":
-          return (
-            compareNullableNumber(left.metaReviewScore, right.metaReviewScore, sortDirection) ||
-            left.paperNumber - right.paperNumber
-          );
-        case "overallAssessment":
-          return (
-            compareNullableNumber(
-              left.overallAssessment.average,
-              right.overallAssessment.average,
-              sortDirection
-            ) || left.paperNumber - right.paperNumber
-          );
-        default:
-          return left.paperNumber - right.paperNumber;
-      }
-    });
+          return searchSpace.includes(deferredSearch);
+        })
+        .sort((left, right) => {
+          switch (activeSortColumn) {
+            case "paperNumber":
+              return sortDirection === "asc"
+                ? left.paperNumber - right.paperNumber
+                : right.paperNumber - left.paperNumber;
+            case "areaChair":
+              return (
+                compareText(left.areaChair, right.areaChair, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "paperType":
+              return (
+                compareText(left.paperType || "", right.paperType || "", sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "reviews":
+              return (
+                compareReviewProgress(
+                  left.completedReviews,
+                  left.expectedReviews,
+                  right.completedReviews,
+                  right.expectedReviews,
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
+            case "readyForRebuttal":
+              return (
+                compareBoolean(left.readyForRebuttal, right.readyForRebuttal, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "authorResponseReady":
+              return (
+                compareBoolean(left.authorResponseReady, right.authorResponseReady, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "acChecklistReady":
+              return (
+                compareBoolean(left.acChecklistReady, right.acChecklistReady, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "resubmission":
+              return (
+                compareBoolean(left.resubmission, right.resubmission, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "preprint":
+              return (
+                compareBoolean(left.preprint, right.preprint, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "hasConfidential":
+              return (
+                compareBoolean(left.hasConfidential, right.hasConfidential, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "issueReport":
+              return (
+                compareBoolean(left.issueReport, right.issueReport, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "reviewerConfidence":
+              return (
+                compareNullableNumber(
+                  left.reviewerConfidence.average,
+                  right.reviewerConfidence.average,
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
+            case "soundnessScore":
+              return (
+                compareNullableNumber(left.soundnessScore.average, right.soundnessScore.average, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "excitementScore":
+              return (
+                compareNullableNumber(
+                  left.excitementScore.average,
+                  right.excitementScore.average,
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
+            case "metaReviewScore":
+              return (
+                compareNullableNumber(left.metaReviewScore, right.metaReviewScore, sortDirection) ||
+                left.paperNumber - right.paperNumber
+              );
+            case "overallAssessment":
+              return (
+                compareNullableNumber(
+                  left.overallAssessment.average,
+                  right.overallAssessment.average,
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
+            default:
+              return left.paperNumber - right.paperNumber;
+          }
+        }),
+    [activeSortColumn, deferredSearch, papers, sortDirection]
+  );
 
-  const readyForRebuttalCount = filteredPapers.filter((paper) => paper.readyForRebuttal).length;
-  const missingReviewsCount = filteredPapers.reduce(
-    (total, paper) => total + Math.max(0, 3 - paper.completedReviews),
-    0
+  const { readyForRebuttalCount, missingReviewsCount } = useMemo(
+    () => ({
+      readyForRebuttalCount: filteredPapers.filter((paper) => paper.readyForRebuttal).length,
+      missingReviewsCount: filteredPapers.reduce(
+        (total, paper) => total + Math.max(0, 3 - paper.completedReviews),
+        0
+      )
+    }),
+    [filteredPapers]
   );
 
   function togglePaperDetails(paperId: string) {

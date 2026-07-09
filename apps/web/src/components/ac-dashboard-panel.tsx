@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import { TableBooleanIcon } from "@/components/table-boolean-icon";
 import { formatCountPair, formatScore, formatScoreSummary, joinClasses } from "@/lib/format";
@@ -11,8 +11,97 @@ type ACDashboardPanelProps = {
   papers: PaperRecord[];
 };
 
+type SortColumn =
+  | "areaChair"
+  | "reviews"
+  | "papersReady"
+  | "metaReviews"
+  | "checklist"
+  | "allReviewsReady"
+  | "allMetaReviewsReady";
+
+type SortDirection = "asc" | "desc";
+
+type SortDefinition = {
+  column: SortColumn;
+  label: string;
+  defaultDirection: SortDirection;
+};
+
+const AC_SORT_DEFINITIONS: SortDefinition[] = [
+  { column: "areaChair", label: "Area Chair", defaultDirection: "asc" },
+  { column: "reviews", label: "Reviews", defaultDirection: "desc" },
+  { column: "papersReady", label: "Papers ready", defaultDirection: "desc" },
+  { column: "metaReviews", label: "Meta-reviews", defaultDirection: "desc" },
+  { column: "checklist", label: "Checklist", defaultDirection: "desc" },
+  { column: "allReviewsReady", label: "All papers ready", defaultDirection: "desc" },
+  { column: "allMetaReviewsReady", label: "All meta-reviews ready", defaultDirection: "desc" }
+];
+
 function metaReviewCell(score: number | null) {
   return score == null ? <TableBooleanIcon label="Meta-review" value={false} /> : formatScore(score);
+}
+
+function nextDirection(
+  column: SortColumn,
+  currentColumn: SortColumn,
+  currentDirection: SortDirection
+): SortDirection {
+  if (column === currentColumn) {
+    return currentDirection === "asc" ? "desc" : "asc";
+  }
+
+  const definition = AC_SORT_DEFINITIONS.find((item) => item.column === column);
+  return definition?.defaultDirection ?? "asc";
+}
+
+function compareNullableNumber(
+  left: number | null | undefined,
+  right: number | null | undefined,
+  direction: SortDirection
+) {
+  if (left == null && right == null) {
+    return 0;
+  }
+  if (left == null) {
+    return 1;
+  }
+  if (right == null) {
+    return -1;
+  }
+  return direction === "asc" ? left - right : right - left;
+}
+
+function compareText(left: string, right: string, direction: SortDirection) {
+  const comparison = left.localeCompare(right, undefined, { sensitivity: "base" });
+  return direction === "asc" ? comparison : -comparison;
+}
+
+function compareBoolean(left: boolean, right: boolean, direction: SortDirection) {
+  const comparison = Number(left) - Number(right);
+  return direction === "asc" ? comparison : -comparison;
+}
+
+function compareCountPair(
+  leftCompleted: number,
+  leftExpected: number,
+  rightCompleted: number,
+  rightExpected: number,
+  direction: SortDirection
+) {
+  const pairDirection = direction === "desc" ? "asc" : "desc";
+
+  return (
+    compareNullableNumber(leftCompleted, rightCompleted, pairDirection) ||
+    compareNullableNumber(leftExpected, rightExpected, pairDirection)
+  );
+}
+
+function headerAriaSort(column: SortColumn, sortColumn: SortColumn, sortDirection: SortDirection) {
+  if (column !== sortColumn) {
+    return "none";
+  }
+  return sortDirection === "asc" ? "ascending" : "descending";
 }
 
 function profileIdDisplayName(profileId: string) {
@@ -37,12 +126,93 @@ function formatRecipientList(records: AreaChairRecord[]) {
 export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) {
   const [expandedAreaChair, setExpandedAreaChair] = useState<string | null>(null);
   const [copiedEmail, setCopiedEmail] = useState<{ target: string; preview: string } | null>(null);
-  const missingMetaReviewsCount = areaChairs.reduce(
-    (total, record) => total + Math.max(0, record.numPapers - record.metaReviewsDone),
-    0
+  const [sortColumn, setSortColumn] = useState<SortColumn>("areaChair");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const missingMetaReviewsCount = useMemo(
+    () => areaChairs.reduce((total, record) => total + Math.max(0, record.numPapers - record.metaReviewsDone), 0),
+    [areaChairs]
   );
-  const areaChairsWithEmails = areaChairs.filter((record) => record.areaChairEmail);
-  const areaChairEmails = formatRecipientList(areaChairsWithEmails);
+  const areaChairsWithEmails = useMemo(
+    () => areaChairs.filter((record) => record.areaChairEmail),
+    [areaChairs]
+  );
+  const areaChairEmails = useMemo(() => formatRecipientList(areaChairsWithEmails), [areaChairsWithEmails]);
+  const papersByAreaChair = useMemo(() => {
+    const grouped = new Map<string, PaperRecord[]>();
+    for (const paper of papers) {
+      const assignedPapers = grouped.get(paper.areaChair);
+      if (assignedPapers) {
+        assignedPapers.push(paper);
+      } else {
+        grouped.set(paper.areaChair, [paper]);
+      }
+    }
+
+    for (const assignedPapers of grouped.values()) {
+      assignedPapers.sort((left, right) => left.paperNumber - right.paperNumber);
+    }
+
+    return grouped;
+  }, [papers]);
+  const sortedAreaChairs = useMemo(
+    () =>
+      [...areaChairs].sort((left, right) => {
+        let comparison = 0;
+
+        switch (sortColumn) {
+          case "areaChair":
+            comparison = compareText(left.areaChair, right.areaChair, sortDirection);
+            break;
+          case "reviews":
+            comparison = compareCountPair(
+              left.totalCompletedReviews,
+              left.totalExpectedReviews,
+              right.totalCompletedReviews,
+              right.totalExpectedReviews,
+              sortDirection
+            );
+            break;
+          case "papersReady":
+            comparison = compareCountPair(
+              left.papersReady,
+              left.numPapers,
+              right.papersReady,
+              right.numPapers,
+              sortDirection
+            );
+            break;
+          case "metaReviews":
+            comparison = compareCountPair(
+              left.metaReviewsDone,
+              left.numPapers,
+              right.metaReviewsDone,
+              right.numPapers,
+              sortDirection
+            );
+            break;
+          case "checklist":
+            comparison = compareCountPair(
+              left.acChecklistDone,
+              left.numPapers,
+              right.acChecklistDone,
+              right.numPapers,
+              sortDirection
+            );
+            break;
+          case "allReviewsReady":
+            comparison = compareBoolean(left.allReviewsReady, right.allReviewsReady, sortDirection);
+            break;
+          case "allMetaReviewsReady":
+            comparison = compareBoolean(left.allMetaReviewsReady, right.allMetaReviewsReady, sortDirection);
+            break;
+          default:
+            comparison = 0;
+        }
+
+        return comparison || compareText(left.areaChair, right.areaChair, "asc");
+      }),
+    [areaChairs, sortColumn, sortDirection]
+  );
 
   function toggleAreaChairDetails(areaChair: string) {
     setExpandedAreaChair((currentAreaChair) => (currentAreaChair === areaChair ? null : areaChair));
@@ -96,22 +266,41 @@ export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) 
         <table className="data-table">
           <thead>
             <tr>
-              <th>Area Chair</th>
-              <th>Reviews</th>
-              <th>Papers ready</th>
-              <th>Meta-reviews</th>
-              <th>Checklist</th>
-              <th>All papers ready</th>
-              <th>All meta-reviews ready</th>
+              {AC_SORT_DEFINITIONS.map((definition) => {
+                const isActive = definition.column === sortColumn;
+                const indicator = !isActive ? "↕" : sortDirection === "asc" ? "↑" : "↓";
+
+                return (
+                  <th
+                    aria-sort={headerAriaSort(definition.column, sortColumn, sortDirection)}
+                    key={definition.column}
+                    scope="col"
+                  >
+                    <button
+                      className={joinClasses("table-head-button", isActive && "active")}
+                      onClick={() => {
+                        setSortDirection((currentDirection) =>
+                          nextDirection(definition.column, sortColumn, currentDirection)
+                        );
+                        setSortColumn(definition.column);
+                      }}
+                      type="button"
+                    >
+                      <span>{definition.label}</span>
+                      <span aria-hidden="true" className="sort-indicator">
+                        {indicator}
+                      </span>
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {areaChairs.map((record) => {
+            {sortedAreaChairs.map((record) => {
               const expanded = expandedAreaChair === record.areaChair;
               const recipient = formatRecipient(record);
-              const assignedPapers = papers
-                .filter((paper) => paper.areaChair === record.areaChair)
-                .sort((left, right) => left.paperNumber - right.paperNumber);
+              const assignedPapers = papersByAreaChair.get(record.areaChair) ?? [];
 
               return (
                 <Fragment key={record.areaChair}>

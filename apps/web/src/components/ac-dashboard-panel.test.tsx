@@ -158,6 +158,43 @@ describe("ACDashboardPanel", () => {
     expect(copyAllButton).toHaveTextContent("Copied 2 emails");
   });
 
+  it("sorts review count pairs by completed reviews before expected reviews", async () => {
+    const sortableAreaChairs: AreaChairRecord[] = [
+      {
+        ...areaChairsFixture[0],
+        areaChair: "~Sort_ThreeOfFour",
+        totalCompletedReviews: 3,
+        totalExpectedReviews: 4
+      },
+      {
+        ...areaChairsFixture[0],
+        areaChair: "~Sort_TwoOfFive",
+        totalCompletedReviews: 2,
+        totalExpectedReviews: 5
+      },
+      {
+        ...areaChairsFixture[0],
+        areaChair: "~Sort_TwoOfThree",
+        totalCompletedReviews: 2,
+        totalExpectedReviews: 3
+      }
+    ];
+    render(createElement(ACDashboardPanel, { areaChairs: sortableAreaChairs, papers: [] }));
+    const user = userEvent.setup();
+
+    const areaChairOrder = () => screen.getAllByText(/^~Sort_/).map((node) => node.textContent);
+
+    await user.click(screen.getByRole("button", { name: "Reviews" }));
+
+    expect(screen.getByRole("columnheader", { name: /^Reviews$/i })).toHaveAttribute("aria-sort", "descending");
+    expect(areaChairOrder()).toEqual(["~Sort_TwoOfThree", "~Sort_TwoOfFive", "~Sort_ThreeOfFour"]);
+
+    await user.click(screen.getByRole("button", { name: "Reviews" }));
+
+    expect(screen.getByRole("columnheader", { name: /^Reviews$/i })).toHaveAttribute("aria-sort", "ascending");
+    expect(areaChairOrder()).toEqual(["~Sort_ThreeOfFour", "~Sort_TwoOfFive", "~Sort_TwoOfThree"]);
+  });
+
   it("reveals assigned papers and their stats when clicking a table row", async () => {
     render(createElement(ACDashboardPanel, { areaChairs: areaChairsFixture, papers: papersFixture }));
     const user = userEvent.setup();

@@ -6,6 +6,7 @@ const apiHost = process.env.ARR_SAC_API_HOST ?? "127.0.0.1";
 const apiPort = process.env.ARR_SAC_API_PORT ?? "8001";
 const webHost = process.env.ARR_SAC_WEB_HOST ?? "127.0.0.1";
 const webPort = process.env.ARR_SAC_WEB_PORT ?? "8000";
+const apiOrigin = process.env.ARR_SAC_API_ORIGIN ?? `http://${apiHost}:${apiPort}`;
 const useSystemPython =
   process.env.ARR_SAC_USE_SYSTEM_PYTHON === "1" || Boolean(process.env.COLAB_RELEASE_TAG);
 const apiPython = process.env.ARR_SAC_API_PYTHON ?? (useSystemPython ? "python3" : "./.venv/bin/python");
@@ -43,7 +44,7 @@ const commands = [
     ],
     env: {
       ...process.env,
-      ARR_SAC_API_ORIGIN: process.env.ARR_SAC_API_ORIGIN ?? `http://${apiHost}:${apiPort}`
+      ARR_SAC_API_ORIGIN: apiOrigin
     }
   }
 ];

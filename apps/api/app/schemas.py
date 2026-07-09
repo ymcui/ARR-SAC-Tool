@@ -55,6 +55,7 @@ class PaperRecord(BaseModel):
     excitementScore: ScoreSummary = Field(default_factory=ScoreSummary)
     overallAssessment: ScoreSummary = Field(default_factory=ScoreSummary)
     metaReviewScore: Optional[float] = None
+    metaReviewConfidence: ScoreSummary = Field(default_factory=ScoreSummary)
     metaReviewText: str = ""
     responseToMetaReview: str = ""
     forumUrl: str

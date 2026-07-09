@@ -350,13 +350,19 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
             self.group_requests.append(group_id)
             if group_id == "aclweb.org/ACL/2026/Conference":
                 return SimpleNamespace(content={"submission_name": {"value": "Commitment"}})
-            if group_id == "aclweb.org/ACL/2026/Conference/Commitment42/Reviewers":
-                return SimpleNamespace(members=["~Reviewer1", "~Reviewer2"])
             raise AssertionError(f"Unexpected group lookup: {group_id}")
 
         def get_all_groups(self, prefix: str, members: str | None = None):
             assert prefix == "aclweb.org/ACL/2026/Conference"
             self.all_group_requests.append((members, prefix))
+            if members is None:
+                return [
+                    SimpleNamespace(
+                        id="aclweb.org/ACL/2026/Conference/Commitment42/Reviewers",
+                        members=["~Reviewer1", "~Reviewer2"],
+                    )
+                ]
+            assert members == "~Test_SAC1"
             return [
                 SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Area_Chairs"),
                 SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Authors"),
@@ -416,6 +422,8 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
 
     assert client.note_requests == ["aclweb.org/ACL/2026/Conference/-/Commitment"]
     assert client.forum_requests == [("arr-paper-42", "replies")]
+    assert (None, "aclweb.org/ACL/2026/Conference") in client.all_group_requests
+    assert "aclweb.org/ACL/2026/Conference/Commitment42/Reviewers" not in client.group_requests
     assert snapshot["my_sac_groups"] == ["aclweb.org/ACL/2026/Conference/Area_Chairs"]
     assert len(snapshot["submissions"]) == 1
     submission = snapshot["submissions"][0]
@@ -427,6 +435,74 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
     assert submission["content"]["title"]["value"] == "Committed Work on Review Monitoring"
     assert submission["content"]["Previous URL"]["value"] == "https://openreview.net/forum?id=previous-arr-paper"
     assert submission["replies"][0]["id"] == "review-1"
+
+
+def test_gateway_continues_commitment_area_chair_lookup_after_empty_bulk_group() -> None:
+    class CommitmentAreaChairFallbackClient:
+        def __init__(self) -> None:
+            self.user = {"profile": {"id": "~Test_SAC1", "fullname": "Test SAC"}}
+            self.all_group_requests: list[tuple[str | None, str]] = []
+            self.forum_requests: list[tuple[str, str]] = []
+            self.group_requests: list[str] = []
+
+        def get_group(self, group_id: str):
+            self.group_requests.append(group_id)
+            if group_id == "aclweb.org/ACL/2026/Conference":
+                return SimpleNamespace(content={"submission_name": {"value": "Commitment"}})
+            raise AssertionError(f"Unexpected group lookup: {group_id}")
+
+        def get_all_groups(self, prefix: str, members: str | None = None):
+            assert prefix == "aclweb.org/ACL/2026/Conference"
+            self.all_group_requests.append((members, prefix))
+            if members is None:
+                return [
+                    SimpleNamespace(
+                        id="aclweb.org/ACL/2026/Conference/Commitment42/Area_Chairs",
+                        members=[],
+                    ),
+                    SimpleNamespace(
+                        id="aclweb.org/ACL/2026/Conference/Submission42/Area_Chairs",
+                        members=["~Fallback_AC1"],
+                    ),
+                    SimpleNamespace(
+                        id="aclweb.org/ACL/2026/Conference/Commitment42/Reviewers",
+                        members=["~Reviewer1"],
+                    ),
+                ]
+            assert members == "~Test_SAC1"
+            return [SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Area_Chairs")]
+
+        def get_all_notes(self, invitation: str):
+            assert invitation == "aclweb.org/ACL/2026/Conference/-/Commitment"
+            return [
+                SimpleNamespace(
+                    number=7,
+                    id="commitment-7",
+                    readers=["everyone"],
+                    content={"paper_link": {"value": "https://openreview.net/forum?id=arr-paper-42"}},
+                )
+            ]
+
+        def get_note(self, note_id: str, details: str):
+            self.forum_requests.append((note_id, details))
+            assert note_id == "arr-paper-42"
+            assert details == "replies"
+            return SimpleNamespace(
+                number=42,
+                id="arr-paper-42",
+                readers=["everyone"],
+                content={"venue": {"value": "ACL ARR 2026 March"}},
+                details={"replies": []},
+            )
+
+    client = CommitmentAreaChairFallbackClient()
+
+    snapshot = OpenReviewGateway().fetch_dashboard_snapshot(client, "aclweb.org/ACL/2026/Conference")
+
+    assert (None, "aclweb.org/ACL/2026/Conference") in client.all_group_requests
+    assert "aclweb.org/ACL/2026/Conference/Submission42/Area_Chairs" not in client.group_requests
+    assert snapshot["submissions"][0]["area_chairs"] == ["~Fallback_AC1"]
+    assert snapshot["submissions"][0]["reviewers"] == ["~Reviewer1"]
 
 
 def test_gateway_skips_out_of_scope_commitment_entries_before_loading_forum() -> None:

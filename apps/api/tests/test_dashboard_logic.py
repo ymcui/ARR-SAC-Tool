@@ -197,7 +197,10 @@ def test_meta_review_fallback_fields_are_supported() -> None:
                 "replies": [
                     {
                         "invitations": ["venue/Submission1/-/Meta_Review"],
-                        "content": {"score": {"value": "3.5 Strong accept"}},
+                        "content": {
+                            "score": {"value": "3.5 Strong accept"},
+                            "confidence": {"value": "4.0 High confidence"},
+                        },
                         "signatures": ["venue/Submission1/Area_Chair_1"],
                     }
                 ],
@@ -209,6 +212,8 @@ def test_meta_review_fallback_fields_are_supported() -> None:
 
     response = build_dashboard_response(snapshot, "venue")
     assert response.papers[0].metaReviewScore == 3.5
+    assert response.papers[0].metaReviewConfidence.average == 4.0
+    assert response.papers[0].metaReviewConfidence.values == [4.0]
 
 
 def test_empty_comments_produce_empty_comment_groups() -> None:

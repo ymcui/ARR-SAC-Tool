@@ -7,10 +7,10 @@ SAC Monitor helps you load your assigned OpenReview venue, inspect paper status,
 ![banner](./assets/banner.jpg)
 
 > [!NOTE]
-> 1. **Use the latest code when available (an icon will show if there are updates) to get the latest features and bug fixes.**
-> 2. If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle.
-> 3. If you want to run the dashboard in a Colab notebook, please check the "[Running In Colab](#running-in-colab)" section below for instructions (will not be maintained). 
-> 4. For detailed changelog, please check [CHANGELOG.md](./CHANGELOG.md).
+> - **Use the latest code when available (an icon will show if there are updates) to get the latest features and bug fixes.**
+> - If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle (will not be maintained). 
+> - If you want to run the dashboard in a Colab notebook, please check the "[Running In Colab](#running-in-colab)" section below for instructions.
+> - For detailed changelog, please check [CHANGELOG.md](./CHANGELOG.md).
 
 ## Latest Supported Venues
 
@@ -202,3 +202,4 @@ Open the `https://....trycloudflare.com` URL printed by `cloudflared`. Keep both
 ## Feedback
 
 As ARR and *ACL conferences are making updates to processes and tools, the provided tools may not fully adapt to any ARR cycle or commitment stage. If you encounter any issues or have suggestions for improvement, please feel free to open an issue in this repository.
+

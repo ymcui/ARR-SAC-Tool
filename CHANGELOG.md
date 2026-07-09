@@ -2,6 +2,57 @@
 
 All notable user-facing changes are documented here.
 
+## [2.6.0] - 2026-07-09
+
+### Added
+
+- Added reviewer score overlays to the overall assessment distribution chart for excitement, soundness, and reviewer confidence.
+- Added an individual overall-score distribution chart for raw reviewer overall assessment scores.
+- Added meta-review confidence parsing and charting alongside meta-review score distributions.
+- Added a Ready `x/y` summary pill to the Alerts tab.
+- Added overall score context beside each paper number in the Comments tab.
+
+### Changed
+
+- Reorganized Analytics into a two-row chart layout with consistent legends, colors, tooltip labels, and empty states.
+- Kept meta-review confidence hidden when no meta-review confidence scores are available.
+- Refined Paper Stats chart height so the paper type and completed-review panels align better.
+
+## [2.5.2] - 2026-07-09
+
+### Fixed
+
+- Bypassed the local Next.js API proxy for browser sessions on `localhost` or `127.0.0.1` so long dashboard loads are less likely to be dropped by the web proxy.
+- Passed the runtime API origin from the Next.js server page to the dashboard client so production starts with custom API ports use the correct backend.
+- Derived FastAPI CORS origins from the configured local web port so custom local ports continue to support direct API calls.
+- Kept raw browser connection errors in the progress card while showing actionable recovery guidance in the dashboard alert.
+
+## [2.5.1] - 2026-07-08
+
+### Fixed
+
+- Recovered initial dashboard loads when a long OpenReview request finishes on the API but the local web proxy drops the browser request.
+- Replaced raw browser connection errors with actionable dashboard guidance to refresh the page, sign in again if needed, and retry Load / Refresh.
+
+## [2.5.0] - 2026-07-08
+
+### Added
+
+- Added sortable column headers to the AC Dashboard table, matching the Papers and Alerts table interaction pattern.
+- Sorted AC Dashboard count-pair columns by completed count first, then total count, so values such as `2 / 3` and `3 / 4` order consistently.
+
+## [2.4.2] - 2026-07-08
+
+### Changed
+
+- Coalesced overlapping dashboard loads for the same SAC and venue so repeated refreshes reuse the in-flight API work instead of starting duplicate OpenReview scans.
+- Parallelized area chair contact lookups and reused bulk commitment-stage group data for faster dashboard assembly.
+- Memoized derived dashboard data across Papers, AC Dashboard, Alerts, Comments, and Analytics to reduce repeated browser-side table and chart work.
+
+### Fixed
+
+- Preserved commitment-stage group fallback behavior when an expected primary assignment group exists but is empty.
+
 ## [2.4.1] - 2026-07-07
 
 ### Fixed

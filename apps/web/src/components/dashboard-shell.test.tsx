@@ -35,6 +35,16 @@ function appFetchCalls(fetchMock: ReturnType<typeof createFetchMock>) {
   return fetchMock.mock.calls.filter(([input]) => String(input) !== GITHUB_PACKAGE_URL);
 }
 
+function apiRequestPath(input: RequestInfo | URL | string): string {
+  const url = String(input);
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
 const dashboardFixture: DashboardResponse = {
   viewer: { id: "~Test_SAC1", fullname: "Test SAC" },
   venue: {
@@ -193,6 +203,56 @@ describe("DashboardShell", () => {
     expect(String(appFetchCalls(fetchMock)[2][0])).toContain("refresh=1");
   });
 
+  it("uses the direct API origin for local dev pages instead of the Next rewrite proxy", async () => {
+    const fetchMock = createFetchMock(
+      createResponse(dashboardFixture.viewer),
+      createResponse(dashboardFixture)
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(createElement(DashboardShell));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+
+    expect(await screen.findByRole("button", { name: "42" })).toBeInTheDocument();
+
+    const requestUrls = appFetchCalls(fetchMock).map(([input]) => String(input));
+    expect(requestUrls[0]).toBe("http://127.0.0.1:8001/api/session/login");
+    expect(requestUrls[1]).toContain("http://127.0.0.1:8001/api/dashboard?");
+    expect(requestUrls[1]).toContain("refresh=0");
+  });
+
+  it("uses the runtime API origin provided by the server page for local pages", async () => {
+    const fetchMock = createFetchMock(
+      createResponse(dashboardFixture.viewer),
+      createResponse(dashboardFixture)
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(createElement(DashboardShell, { configuredApiOrigin: "http://127.0.0.1:8124" }));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+
+    expect(await screen.findByRole("button", { name: "42" })).toBeInTheDocument();
+
+    const requestUrls = appFetchCalls(fetchMock).map(([input]) => String(input));
+    expect(requestUrls[0]).toBe("http://127.0.0.1:8124/api/session/login");
+    expect(requestUrls[1]).toContain("http://127.0.0.1:8124/api/dashboard?");
+    expect(requestUrls[1]).toContain("refresh=0");
+  });
+
   it("recovers a refresh when the long dashboard request disconnects after the backend finishes", async () => {
     const refreshedDashboardFixture: DashboardResponse = {
       ...dashboardFixture,
@@ -220,11 +280,11 @@ describe("DashboardShell", () => {
         return createResponse({ version: "2.1.2" });
       }
 
-      if (url === "/api/session/login") {
+      if (apiRequestPath(url) === "/api/session/login") {
         return createResponse(dashboardFixture.viewer);
       }
 
-      if (url.startsWith("/api/dashboard/progress")) {
+      if (apiRequestPath(url).startsWith("/api/dashboard/progress")) {
         recoveryProgressCalls += 1;
         if (recoveryProgressCalls === 1) {
           return createResponse({
@@ -251,12 +311,12 @@ describe("DashboardShell", () => {
         });
       }
 
-      if (url.startsWith("/api/dashboard?") && url.includes("refresh=0")) {
+      if (apiRequestPath(url).startsWith("/api/dashboard?") && url.includes("refresh=0")) {
         cachedDashboardCalls += 1;
         return createResponse(cachedDashboardCalls === 1 ? dashboardFixture : refreshedDashboardFixture);
       }
 
-      if (url.startsWith("/api/dashboard?") && url.includes("refresh=1")) {
+      if (apiRequestPath(url).startsWith("/api/dashboard?") && url.includes("refresh=1")) {
         currentRefreshLoadId = new URL(url, "http://localhost").searchParams.get("loadId");
         throw new TypeError("The string did not match the expected pattern.");
       }
@@ -285,9 +345,112 @@ describe("DashboardShell", () => {
 
     const requestUrls = fetchMock.mock.calls.map(([input]) => String(input));
     expect(requestUrls.some((url) => url.includes("refresh=1"))).toBe(true);
-    expect(requestUrls.some((url) => url.startsWith("/api/dashboard/progress"))).toBe(true);
+    expect(requestUrls.some((url) => apiRequestPath(url).startsWith("/api/dashboard/progress"))).toBe(true);
     expect(recoveryProgressCalls).toBeGreaterThanOrEqual(2);
-    expect(requestUrls.filter((url) => url.startsWith("/api/dashboard?") && url.includes("refresh=0"))).toHaveLength(2);
+    expect(
+      requestUrls.filter((url) => apiRequestPath(url).startsWith("/api/dashboard?") && url.includes("refresh=0"))
+    ).toHaveLength(2);
+  });
+
+  it("recovers an initial load when the long dashboard request disconnects after the backend finishes", async () => {
+    let currentLoadId: string | null = null;
+    let cachedDashboardCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === GITHUB_PACKAGE_URL) {
+        return createResponse({ version: "2.1.2" });
+      }
+
+      if (apiRequestPath(url) === "/api/session/login") {
+        return createResponse(dashboardFixture.viewer);
+      }
+
+      if (apiRequestPath(url).startsWith("/api/dashboard/progress")) {
+        return createResponse({
+          venueId: dashboardFixture.venue.venueId,
+          loadId: currentLoadId,
+          phase: "ready",
+          message: "Loaded workspace.",
+          current: 1,
+          total: 1,
+          done: true,
+          error: null
+        });
+      }
+
+      if (apiRequestPath(url).startsWith("/api/dashboard?") && url.includes("refresh=0")) {
+        cachedDashboardCalls += 1;
+        currentLoadId = new URL(url, "http://localhost").searchParams.get("loadId");
+        if (cachedDashboardCalls === 1) {
+          throw new TypeError("The string did not match the expected pattern.");
+        }
+        return createResponse(dashboardFixture);
+      }
+
+      throw new Error(`Unexpected fetch call: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(createElement(DashboardShell));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+
+    expect(await screen.findByRole("button", { name: "42" }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText("The string did not match the expected pattern.")).not.toBeInTheDocument();
+
+    const requestUrls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(requestUrls.some((url) => apiRequestPath(url).startsWith("/api/dashboard/progress"))).toBe(true);
+    expect(
+      requestUrls.filter((url) => apiRequestPath(url).startsWith("/api/dashboard?") && url.includes("refresh=0"))
+    ).toHaveLength(2);
+  });
+
+  it("shows actionable guidance when a disconnected dashboard load cannot be recovered", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === GITHUB_PACKAGE_URL) {
+        return createResponse({ version: "2.1.2" });
+      }
+
+      if (apiRequestPath(url) === "/api/session/login") {
+        return createResponse(dashboardFixture.viewer);
+      }
+
+      if (apiRequestPath(url).startsWith("/api/dashboard/progress")) {
+        throw new TypeError("The string did not match the expected pattern.");
+      }
+
+      if (apiRequestPath(url).startsWith("/api/dashboard?") && url.includes("refresh=0")) {
+        throw new TypeError("The string did not match the expected pattern.");
+      }
+
+      throw new Error(`Unexpected fetch call: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(createElement(DashboardShell));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+
+    expect(await screen.findByText("The string did not match the expected pattern.")).toBeInTheDocument();
+    expect(
+      screen.getByText(/the dashboard connection was interrupted before data could be loaded/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/refresh this page and sign in again if prompted/i)).toBeInTheDocument();
   });
 
   it("offers recent valid venue IDs as soft dropdown suggestions", async () => {

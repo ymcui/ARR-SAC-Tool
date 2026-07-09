@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 import xml.etree.ElementTree as ET
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 
@@ -40,6 +43,21 @@ class FakeGateway:
         self.fetch_count += 1
         if progress_callback:
             progress_callback("submissions", "Fetching venue submissions and replies...", 1, 3)
+        return self.snapshot
+
+
+class BlockingGateway(FakeGateway):
+    def __init__(self, snapshot: dict) -> None:
+        super().__init__(snapshot)
+        self.release = threading.Event()
+        self.started = threading.Event()
+
+    def fetch_dashboard_snapshot(self, client, venue_id: str, progress_callback=None) -> dict:
+        self.fetch_count += 1
+        self.started.set()
+        if progress_callback:
+            progress_callback("submissions", "Fetching venue submissions and replies...", 1, 3)
+        assert self.release.wait(timeout=3)
         return self.snapshot
 
 
@@ -82,6 +100,24 @@ def test_login_failure_returns_401() -> None:
     assert response.json()["detail"] == "Invalid OpenReview credentials."
 
 
+def test_cors_allows_configured_local_web_port(monkeypatch) -> None:
+    monkeypatch.setenv("ARR_SAC_WEB_PORT", "8123")
+    app = create_app(gateway=FakeGateway(load_fixture()), session_store=SessionStore())
+    client = TestClient(app)
+
+    for origin in ("http://127.0.0.1:8123", "http://localhost:8123"):
+        response = client.options(
+            "/api/health",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+
 def test_dashboard_cache_and_refresh_flow() -> None:
     gateway = FakeGateway(load_fixture())
     app = create_app(gateway=gateway, session_store=SessionStore(cache_ttl_seconds=999))
@@ -111,6 +147,43 @@ def test_dashboard_cache_and_refresh_flow() -> None:
 
     after_logout = client.get("/api/dashboard", params={"venueId": "aclweb.org/ACL/ARR/2026/March"})
     assert after_logout.status_code == 401
+
+
+def test_dashboard_reuses_inflight_load_for_duplicate_refreshes() -> None:
+    gateway = BlockingGateway(load_fixture())
+    app = create_app(gateway=gateway, session_store=SessionStore(cache_ttl_seconds=999))
+    client = TestClient(app)
+
+    login_response = client.post(
+        "/api/session/login",
+        json={"username": "demo@example.com", "password": "secret"},
+    )
+    assert login_response.status_code == 200
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            client.get,
+            "/api/dashboard",
+            params={"venueId": "aclweb.org/ACL/ARR/2026/March", "refresh": 1, "loadId": "first-load"},
+        )
+        assert gateway.started.wait(timeout=2)
+
+        second = executor.submit(
+            client.get,
+            "/api/dashboard",
+            params={"venueId": "aclweb.org/ACL/ARR/2026/March", "refresh": 1, "loadId": "second-load"},
+        )
+        time.sleep(0.1)
+        assert gateway.fetch_count == 1
+
+        gateway.release.set()
+        first_response = first.result(timeout=3)
+        second_response = second.result(timeout=3)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert gateway.fetch_count == 1
+    assert first_response.json()["summary"]["totalPapers"] == second_response.json()["summary"]["totalPapers"]
 
 
 def test_dashboard_progress_endpoint_reports_completion_state() -> None:
