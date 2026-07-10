@@ -21,7 +21,11 @@ from app.schemas import (
     ViewerInfo,
 )
 from app.services.export_xlsx import build_dashboard_export_xlsx
-from app.services.openreview_gateway import AuthenticationError
+from app.services.openreview_gateway import (
+    AuthenticationError,
+    AuthenticationMfaRequired,
+    AuthenticationServiceError,
+)
 from app.session_store import SessionStore
 
 
@@ -98,6 +102,80 @@ def test_login_failure_returns_401() -> None:
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid OpenReview credentials."
+
+
+def test_login_maps_mfa_and_upstream_failures() -> None:
+    class LoginFailureGateway(FakeGateway):
+        def __init__(self, error: Exception) -> None:
+            super().__init__(load_fixture())
+            self.error = error
+
+        def authenticate(self, username: str, password: str):
+            raise self.error
+
+    for error, expected_status in (
+        (AuthenticationMfaRequired("MFA required."), 409),
+        (AuthenticationServiceError("OpenReview unavailable."), 503),
+    ):
+        client = TestClient(create_app(gateway=LoginFailureGateway(error), session_store=SessionStore()))
+        response = client.post(
+            "/api/session/login",
+            json={"username": "sac@example.com", "password": "password"},
+        )
+        assert response.status_code == expected_status
+
+
+def test_https_login_sets_secure_session_cookie() -> None:
+    client = TestClient(
+        create_app(gateway=FakeGateway(load_fixture()), session_store=SessionStore()),
+        base_url="https://dashboard.example",
+    )
+
+    response = client.post(
+        "/api/session/login",
+        json={"username": "sac@example.com", "password": "password"},
+    )
+
+    assert response.status_code == 200
+    assert "Secure" in response.headers["set-cookie"]
+
+
+def test_forwarded_https_login_sets_secure_session_cookie() -> None:
+    client = TestClient(create_app(gateway=FakeGateway(load_fixture()), session_store=SessionStore()))
+
+    response = client.post(
+        "/api/session/login",
+        headers={"x-forwarded-proto": "https"},
+        json={"username": "sac@example.com", "password": "password"},
+    )
+
+    assert response.status_code == 200
+    assert "Secure" in response.headers["set-cookie"]
+
+
+def test_unexpected_gateway_failure_finishes_progress_with_error() -> None:
+    class FailingGateway(FakeGateway):
+        def fetch_dashboard_snapshot(self, client, venue_id: str, progress_callback=None) -> dict:
+            raise RuntimeError("unexpected")
+
+    client = TestClient(create_app(gateway=FailingGateway(load_fixture()), session_store=SessionStore()))
+    client.post(
+        "/api/session/login",
+        json={"username": "sac@example.com", "password": "password"},
+    )
+
+    response = client.get(
+        "/api/dashboard",
+        params={"venueId": "aclweb.org/ACL/ARR/2026/March", "loadId": "failed-load"},
+    )
+    progress = client.get(
+        "/api/dashboard/progress",
+        params={"venueId": "aclweb.org/ACL/ARR/2026/March"},
+    )
+
+    assert response.status_code == 502
+    assert progress.json()["done"] is True
+    assert progress.json()["error"] == "The dashboard could not be loaded from OpenReview."
 
 
 def test_cors_allows_configured_local_web_port(monkeypatch) -> None:

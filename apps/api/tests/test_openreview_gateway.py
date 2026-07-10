@@ -2,13 +2,95 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.services.openreview_gateway import OpenReviewGateway
+import pytest
+
+from app.services import openreview_gateway
+from app.services.openreview_gateway import (
+    AuthenticationError,
+    AuthenticationMfaRequired,
+    AuthenticationServiceError,
+    DashboardFetchError,
+    OpenReviewGateway,
+)
+
+
+class LoginResponse:
+    def __init__(self, status_code: int, payload: dict) -> None:
+        self.status_code = status_code
+        self.ok = 200 <= status_code < 300
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+
+class LoginSession:
+    def __init__(self, response: LoginResponse) -> None:
+        self.response = response
+        self.request = lambda method, url, **kwargs: response
+
+    def post(self, url, **kwargs):
+        return self.request("POST", url, **kwargs)
+
+
+def login_client(response: LoginResponse):
+    return SimpleNamespace(
+        session=LoginSession(response),
+        login_url="https://api2.openreview.net/login",
+        headers={},
+    )
+
+
+def test_authenticate_rejects_blank_username_before_openreview_client(monkeypatch) -> None:
+    monkeypatch.setattr(
+        openreview_gateway.openreview.api,
+        "OpenReviewClient",
+        lambda **kwargs: pytest.fail("OpenReview client must not be created for blank credentials"),
+    )
+
+    with pytest.raises(AuthenticationError):
+        OpenReviewGateway().authenticate("   ", "password")
+
+
+def test_authenticate_reports_mfa_without_terminal_prompt(monkeypatch) -> None:
+    client = login_client(LoginResponse(200, {"mfaPending": True, "mfaMethods": ["totp"]}))
+    monkeypatch.setattr(openreview_gateway.openreview.api, "OpenReviewClient", lambda **kwargs: client)
+
+    with pytest.raises(AuthenticationMfaRequired, match="MFA"):
+        OpenReviewGateway().authenticate("sac@example.com", "password")
+
+
+def test_authenticate_configures_timeout_and_populates_client(monkeypatch) -> None:
+    client = login_client(
+        LoginResponse(
+            200,
+            {"token": "token", "user": {"profile": {"id": "~SAC1", "fullname": "SAC One"}}},
+        )
+    )
+    calls = []
+    client.session.request = lambda method, url, **kwargs: calls.append((method, url, kwargs)) or client.session.response
+    monkeypatch.setattr(openreview_gateway.openreview.api, "OpenReviewClient", lambda **kwargs: client)
+
+    authenticated_client, viewer = OpenReviewGateway().authenticate(" sac@example.com ", "password")
+
+    assert authenticated_client is client
+    assert viewer.id == "~SAC1"
+    assert client.headers["Authorization"] == "Bearer token"
+    assert calls[0][2]["timeout"] == (10, 180)
+
+
+def test_authenticate_maps_upstream_server_failure(monkeypatch) -> None:
+    client = login_client(LoginResponse(503, {}))
+    monkeypatch.setattr(openreview_gateway.openreview.api, "OpenReviewClient", lambda **kwargs: client)
+
+    with pytest.raises(AuthenticationServiceError, match="503"):
+        OpenReviewGateway().authenticate("sac@example.com", "password")
 
 
 class FakeClient:
     def __init__(self) -> None:
         self.user = {"profile": {"id": "~Test_SAC1", "fullname": "Test SAC"}}
-        self.note_requests: list[tuple[str, str]] = []
+        self.note_requests: list[tuple[str, str | None, int | None]] = []
         self.group_requests: list[str] = []
         self.all_group_requests: list[tuple[str | None, str]] = []
         self.grouped_edge_requests: list[tuple[str, str, str]] = []
@@ -136,11 +218,11 @@ class FakeClient:
             },
         )
 
-    def get_all_notes(self, invitation: str, details: str):
+    def get_all_notes(self, invitation: str, details: str | None = None, number: int | None = None):
         assert invitation == "aclweb.org/ACL/ARR/2026/March/-/Submission"
-        assert details == "replies"
-        self.note_requests.append((invitation, details))
-        return [
+        assert details is None
+        self.note_requests.append((invitation, details, number))
+        notes = [
             SimpleNamespace(
                 number=13,
                 id="paper-13",
@@ -177,6 +259,7 @@ class FakeClient:
                 details={"replies": []},
             ),
         ]
+        return [note for note in notes if number is None or note.number == number]
 
 
 def test_gateway_bulk_fetches_assignment_groups_after_filtering_submissions() -> None:
@@ -189,9 +272,7 @@ def test_gateway_bulk_fetches_assignment_groups_after_filtering_submissions() ->
         progress_callback=lambda phase, message, current, total: phases.append((phase, message, current, total)),
     )
 
-    assert client.note_requests == [
-        ("aclweb.org/ACL/ARR/2026/March/-/Submission", "replies"),
-    ]
+    assert sorted(number for _, _, number in client.note_requests) == [42, 77, 99]
     assert [submission["number"] for submission in snapshot["submissions"]] == [42, 77]
     assert snapshot["my_sac_groups"] == [
         "aclweb.org/ACL/ARR/2026/March/Submission42/Senior_Area_Chairs",
@@ -219,7 +300,7 @@ def test_gateway_bulk_fetches_assignment_groups_after_filtering_submissions() ->
     assert phases[0][0] == "venue"
     assert any(phase[0] == "submissions" for phase in phases)
     assert any(phase[0] == "scope" for phase in phases)
-    assert any(phase[0] == "papers" and phase[3] == 5 for phase in phases)
+    assert any(phase[0] == "papers" and phase[3] == 3 for phase in phases)
     assert any(phase[0] == "groups" and phase[3] == 3 for phase in phases)
 
 
@@ -234,17 +315,22 @@ def test_gateway_keeps_public_readable_submission_when_viewer_has_sac_group() ->
                 SimpleNamespace(id="aclweb.org/ACL/ARR/2026/March/Submission101/Senior_Area_Chairs"),
             ]
 
-        def get_all_notes(self, invitation: str, details: str):
-            return [
-                *super().get_all_notes(invitation=invitation, details=details),
-                SimpleNamespace(
+        def get_all_notes(
+            self,
+            invitation: str,
+            details: str | None = None,
+            number: int | None = None,
+        ):
+            notes = super().get_all_notes(invitation=invitation, details=details, number=number)
+            if number == 101:
+                notes.append(SimpleNamespace(
                     number=101,
                     id="paper-101",
                     readers=["everyone"],
                     content={"venue": {"value": "ARR"}, "paper_type": {"value": "Long"}},
                     details={"replies": []},
-                ),
-            ]
+                ))
+            return notes
 
     snapshot = OpenReviewGateway().fetch_dashboard_snapshot(
         PublicReaderClient(),
@@ -300,12 +386,41 @@ def test_gateway_falls_back_when_bulk_anonymous_group_mapping_is_missing() -> No
     assert client.group_requests.count("aclweb.org/ACL/ARR/2026/March/Submission77/Area_Chairs") == 1
 
 
+def test_gateway_fails_closed_when_assignment_group_cannot_be_loaded() -> None:
+    missing_group_id = "aclweb.org/ACL/ARR/2026/March/Submission77/Reviewers"
+
+    class FailingGroupClient(FakeClient):
+        def get_all_groups(self, prefix: str, members: str | None = None):
+            groups = super().get_all_groups(prefix=prefix, members=members)
+            if members is not None:
+                return groups
+            return [group for group in groups if group.id != missing_group_id]
+
+        def get_group(self, group_id: str):
+            if group_id == missing_group_id:
+                raise RuntimeError("OpenReview unavailable")
+            return super().get_group(group_id)
+
+    with pytest.raises(DashboardFetchError, match="Could not resolve assignment group"):
+        OpenReviewGateway().fetch_dashboard_snapshot(
+            FailingGroupClient(),
+            "aclweb.org/ACL/ARR/2026/March",
+        )
+
+
 def test_gateway_normalizes_reply_objects_to_plain_dicts() -> None:
     class ReplyClient(FakeClient):
-        def get_all_notes(self, invitation: str, details: str):
+        def get_all_notes(
+            self,
+            invitation: str,
+            details: str | None = None,
+            number: int | None = None,
+        ):
             assert invitation == "aclweb.org/ACL/ARR/2026/March/-/Submission"
-            assert details == "replies"
-            self.note_requests.append((invitation, details))
+            assert details is None
+            self.note_requests.append((invitation, details, number))
+            if number != 42:
+                return []
             return [
                 SimpleNamespace(
                     number=42,
@@ -659,3 +774,31 @@ def test_gateway_skips_commitment_entries_visible_through_authors_group() -> Non
 
     assert client.forum_requests == []
     assert snapshot["submissions"] == []
+
+
+def test_gateway_fails_closed_when_scoped_commitment_entry_has_invalid_link() -> None:
+    class MissingLinkClient:
+        user = {"profile": {"id": "~Test_SAC1", "fullname": "Test SAC"}}
+
+        def get_group(self, group_id: str):
+            return SimpleNamespace(content={"submission_name": {"value": "Commitment"}})
+
+        def get_all_groups(self, prefix: str, members: str | None = None):
+            assert members == "~Test_SAC1"
+            return [SimpleNamespace(id=f"{prefix}/Area_Chairs")]
+
+        def get_all_notes(self, invitation: str):
+            return [
+                SimpleNamespace(
+                    number=7,
+                    id="commitment-7",
+                    readers=["aclweb.org/ACL/2026/Conference/Area_Chairs"],
+                    content={},
+                )
+            ]
+
+    with pytest.raises(DashboardFetchError, match="invalid paper links=1"):
+        OpenReviewGateway().fetch_dashboard_snapshot(
+            MissingLinkClient(),
+            "aclweb.org/ACL/2026/Conference",
+        )

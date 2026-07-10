@@ -74,6 +74,15 @@ type IndividualOverallScorePoint = {
   reviewCount: number;
 };
 
+type ScoreStatistic = {
+  key: keyof typeof SCORE_LINE_COLORS;
+  label: string;
+  minimum: number | null;
+  maximum: number | null;
+  average: number | null;
+  median: number | null;
+};
+
 function formatPaperShare(count: number, total: number) {
   const percentage = total === 0 ? 0 : Math.round((count / total) * 100);
   const noun = count === 1 ? "paper" : "papers";
@@ -243,6 +252,102 @@ function buildIndividualOverallScoreData(papers: PaperRecord[]): IndividualOvera
     }));
 }
 
+function summarizeScores(scores: Array<number | null>): Omit<ScoreStatistic, "key" | "label"> {
+  const sortedScores = scores
+    .filter((score): score is number => score != null && Number.isFinite(score))
+    .sort((left, right) => left - right);
+
+  if (sortedScores.length === 0) {
+    return { minimum: null, maximum: null, average: null, median: null };
+  }
+
+  const middleIndex = Math.floor(sortedScores.length / 2);
+  const median =
+    sortedScores.length % 2 === 0
+      ? (sortedScores[middleIndex - 1] + sortedScores[middleIndex]) / 2
+      : sortedScores[middleIndex];
+
+  return {
+    minimum: sortedScores[0],
+    maximum: sortedScores[sortedScores.length - 1],
+    average: sortedScores.reduce((total, score) => total + score, 0) / sortedScores.length,
+    median
+  };
+}
+
+function buildScoreStatistics(papers: PaperRecord[]): ScoreStatistic[] {
+  return [
+    {
+      key: "overallAssessment",
+      label: "Overall",
+      ...summarizeScores(papers.map((paper) => paper.overallAssessment.average))
+    },
+    {
+      key: "excitementScore",
+      label: "Excitement",
+      ...summarizeScores(papers.map((paper) => paper.excitementScore.average))
+    },
+    {
+      key: "soundnessScore",
+      label: "Soundness",
+      ...summarizeScores(papers.map((paper) => paper.soundnessScore.average))
+    },
+    {
+      key: "reviewerConfidence",
+      label: "Confidence",
+      ...summarizeScores(papers.map((paper) => paper.reviewerConfidence.average))
+    }
+  ];
+}
+
+function formatStatistic(value: number | null) {
+  return value == null ? "—" : value.toFixed(2);
+}
+
+function ScoreStatisticsTable({
+  label,
+  statistics
+}: {
+  label: string;
+  statistics: ScoreStatistic[];
+}) {
+  return (
+    <div className="score-statistics-table-wrap">
+      <table aria-label={label} className="score-statistics-table">
+        <thead>
+          <tr>
+            <th scope="col">Score</th>
+            <th scope="col">Min</th>
+            <th scope="col">Max</th>
+            <th scope="col">Average</th>
+            <th scope="col">Median</th>
+          </tr>
+        </thead>
+        <tbody>
+          {statistics.map((statistic) => (
+            <tr key={statistic.key}>
+              <th scope="row">
+                <span className="score-statistics-label">
+                  <span
+                    aria-hidden="true"
+                    className="paper-stats-swatch"
+                    style={{ background: SCORE_LINE_COLORS[statistic.key] }}
+                  />
+                  {statistic.label}
+                </span>
+              </th>
+              <td>{formatStatistic(statistic.minimum)}</td>
+              <td>{formatStatistic(statistic.maximum)}</td>
+              <td>{formatStatistic(statistic.average)}</td>
+              <td>{formatStatistic(statistic.median)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function roundToNearestHalfStep(score: number) {
   return Math.max(1, Math.min(5, Math.round(score * 2) / 2));
 }
@@ -279,6 +384,7 @@ export default function AnalyticsPanel({ analytics, papers }: AnalyticsPanelProp
     [analytics.overallAssessmentHistogram, papers]
   );
   const individualOverallScoreData = useMemo(() => buildIndividualOverallScoreData(papers), [papers]);
+  const scoreStatistics = useMemo(() => buildScoreStatistics(papers), [papers]);
   const hasIndividualOverallScores = individualOverallScoreData.some((point) => point.reviewCount > 0);
   const metaReviewDistributionData = useMemo(
     () => buildMetaReviewDistributionData(analytics.metaReviewDistribution, papers),
@@ -402,6 +508,20 @@ export default function AnalyticsPanel({ analytics, papers }: AnalyticsPanelProp
         </div>
 
         <div className="chart-grid">
+          <div className="chart-surface score-statistics-surface">
+            <h3>Score statistics</h3>
+            <div className="score-statistics-grid">
+              <ScoreStatisticsTable
+                label="Overall and excitement score statistics"
+                statistics={scoreStatistics.slice(0, 2)}
+              />
+              <ScoreStatisticsTable
+                label="Soundness and confidence score statistics"
+                statistics={scoreStatistics.slice(2)}
+              />
+            </div>
+          </div>
+
           <div className="chart-surface">
             <h3>Overall and reviewer score distributions</h3>
             <div aria-label="Score series" className="paper-stats-legend score-series-legend">

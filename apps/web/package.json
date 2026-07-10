@@ -1,6 +1,6 @@
 {
   "name": "@arr-sac/web",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev --port 8000",
@@ -11,7 +11,7 @@
   "dependencies": {
     "@fontsource/ibm-plex-mono": "latest",
     "@fontsource/ibm-plex-sans": "latest",
-    "next": "^16.2.4",
+    "next": "^16.2.10",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",

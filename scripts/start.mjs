@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { apiPythonCommand } from "./python-command.mjs";
+
 const root = process.cwd();
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const apiHost = process.env.ARR_SAC_API_HOST ?? "127.0.0.1";
@@ -7,9 +9,7 @@ const apiPort = process.env.ARR_SAC_API_PORT ?? "8001";
 const webHost = process.env.ARR_SAC_WEB_HOST ?? "127.0.0.1";
 const webPort = process.env.ARR_SAC_WEB_PORT ?? "8000";
 const apiOrigin = process.env.ARR_SAC_API_ORIGIN ?? `http://${apiHost}:${apiPort}`;
-const useSystemPython =
-  process.env.ARR_SAC_USE_SYSTEM_PYTHON === "1" || Boolean(process.env.COLAB_RELEASE_TAG);
-const apiPython = process.env.ARR_SAC_API_PYTHON ?? (useSystemPython ? "python3" : "./.venv/bin/python");
+const apiPython = apiPythonCommand(root);
 
 const commands = [
   {
@@ -156,7 +156,7 @@ function spawnCommand({ name, command, args, env = process.env }) {
     shutdown("SIGTERM");
   });
 
-  child.on("exit", (code, signal) => {
+  child.on("close", (code, signal) => {
     children.delete(name);
 
     if (!shuttingDown) {

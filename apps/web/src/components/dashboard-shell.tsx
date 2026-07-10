@@ -36,6 +36,7 @@ const MAX_RECENT_VENUES = 8;
 const DASHBOARD_RECOVERY_TIMEOUT_MS = 120000;
 const DASHBOARD_RECOVERY_POLL_MS = 1000;
 const DASHBOARD_RECOVERY_PROBE_TIMEOUT_MS = 4000;
+const DASHBOARD_REQUEST_TIMEOUT_MS = 125000;
 const DASHBOARD_RECOVERY_GUIDANCE =
   "Try Load / Refresh again. If it fails again, refresh this page and sign in again if prompted. If the app is running locally, make sure npm run dev is still running.";
 const DEFAULT_LOCAL_API_PORT = "8001";
@@ -54,6 +55,34 @@ const COMMITMENT_TABS = TABS.filter((tab) => tab.key !== "ac" && tab.key !== "al
 
 async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
+}
+
+async function responseError(response: Response, fallback: string): Promise<Error> {
+  try {
+    const payload = (await response.clone().json()) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return new Error(payload.detail);
+    }
+  } catch {
+    // Some proxy and upstream failures return HTML or an empty body.
+  }
+
+  return new Error(fallback);
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("The dashboard request timed out while the API continued processing it.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function normalizeLocalApiOrigin(origin: string, browserHostname: string): string | null {
@@ -199,6 +228,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [loadProgress, setLoadProgress] = useState<DashboardLoadProgress | null>(null);
@@ -335,8 +365,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
     }
 
     if (!response.ok) {
-      const payload = await parseJson<{ detail?: string }>(response);
-      throw new Error(payload.detail || "Could not load the refreshed venue cache.");
+      throw await responseError(response, "Could not load the refreshed venue cache.");
     }
 
     return parseJson<DashboardResponse>(response);
@@ -421,19 +450,20 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
     const loadId = createLoadId();
     startProgressPolling(trimmedVenueId, loadId);
 
-    let receivedDashboardResponse = false;
+    let shouldAttemptRecovery = true;
 
     try {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         apiUrl(
           `/api/dashboard?venueId=${encodeURIComponent(trimmedVenueId)}&refresh=${refresh ? "1" : "0"}&loadId=${encodeURIComponent(loadId)}`,
           configuredApiOrigin
         ),
-        { credentials: "include" }
+        { credentials: "include" },
+        DASHBOARD_REQUEST_TIMEOUT_MS
       );
-      receivedDashboardResponse = true;
 
       if (response.status === 401) {
+        shouldAttemptRecovery = false;
         clearClientSession();
         setAuthError("Your OpenReview session expired. Sign in again to continue.");
         setIsLoginOpen(true);
@@ -441,16 +471,21 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
       }
 
       if (!response.ok) {
-        const payload = await parseJson<{ detail?: string }>(response);
-        throw new Error(payload.detail || "Could not load the selected venue.");
+        shouldAttemptRecovery = response.status >= 500 || response.status === 408 || response.status === 429;
+        throw await responseError(response, "Could not load the selected venue.");
       }
 
-      const payload = await parseJson<DashboardResponse>(response);
+      let payload: DashboardResponse;
+      try {
+        payload = await parseJson<DashboardResponse>(response);
+      } catch {
+        throw new Error("The dashboard API returned an invalid response.");
+      }
       applyDashboardPayload(payload, trimmedVenueId);
     } catch (nextError) {
       let message = nextError instanceof Error ? nextError.message : "Unexpected dashboard error.";
 
-      if (!receivedDashboardResponse) {
+      if (shouldAttemptRecovery) {
         stopProgressPolling();
 
         try {
@@ -510,8 +545,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
       });
 
       if (!response.ok) {
-        const payload = await parseJson<{ detail?: string }>(response);
-        throw new Error(payload.detail || "Login failed.");
+        throw await responseError(response, "Login failed.");
       }
 
       const nextViewer = await parseJson<ViewerInfo>(response);
@@ -528,11 +562,24 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
   }
 
   async function handleLogout() {
-    await fetch(apiUrl("/api/session/logout", configuredApiOrigin), {
-      method: "POST",
-      credentials: "include"
-    }).catch(() => undefined);
-    clearClientSession();
+    setIsLoggingOut(true);
+    setDashboardError(null);
+    try {
+      const response = await fetch(apiUrl("/api/session/logout", configuredApiOrigin), {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!response.ok) {
+        throw await responseError(response, "Could not sign out. Your session is still active.");
+      }
+      clearClientSession();
+    } catch (error) {
+      setDashboardError(
+        error instanceof Error ? error.message : "Could not sign out. Your session is still active."
+      );
+    } finally {
+      setIsLoggingOut(false);
+    }
   }
 
   async function handleExport() {
@@ -558,8 +605,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
       }
 
       if (!response.ok) {
-        const payload = await parseJson<{ detail?: string }>(response);
-        throw new Error(payload.detail || "Could not export the selected venue.");
+        throw await responseError(response, "Could not export the selected venue.");
       }
 
       const blob = await response.blob();
@@ -591,11 +637,12 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
     setIsLoginOpen(false);
   }
 
-  const isBusy = isAuthenticating || isLoadingDashboard;
-  const hasDashboard = dashboard !== null;
-  const visibleTabs = dashboard?.venue.stage === "Commitment Stage" ? COMMITMENT_TABS : TABS;
+  const loadedDashboard =
+    dashboard?.venue.venueId.trim() === venueId.trim() ? dashboard : null;
+  const isBusy = isAuthenticating || isLoadingDashboard || isLoggingOut;
+  const visibleTabs = loadedDashboard?.venue.stage === "Commitment Stage" ? COMMITMENT_TABS : TABS;
   const selectedTab = visibleTabs.some((tab) => tab.key === activeTab) ? activeTab : "papers";
-  const venueStage = getVenueStage(venueId);
+  const venueStage = loadedDashboard?.venue.stage ?? getVenueStage(venueId);
   const shouldRefreshLoadedVenue = Boolean(
     dashboard?.venue.venueId && dashboard.venue.venueId.trim() === venueId.trim()
   );
@@ -613,7 +660,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
             }}
             onLogout={() => void handleLogout()}
             onTabChange={setActiveTab}
-            showTabs={viewer && dashboard ? true : false}
+            showTabs={viewer && loadedDashboard ? true : false}
             tabs={visibleTabs}
             venueStage={venueStage}
             viewer={viewer}
@@ -624,19 +671,25 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
           <section className="workspace-top-grid">
             <VenueWorkspacePanel
               isBusy={isBusy}
-              lastSyncedAt={dashboard?.venue.lastSyncedAt}
+              lastSyncedAt={loadedDashboard?.venue.lastSyncedAt}
               loadProgress={loadProgress}
               onLoadOrRefresh={() => void requestDashboard(venueId, shouldRefreshLoadedVenue)}
               onVenueIdChange={(value) => {
                 setVenueId(value);
+                if (value.trim() !== dashboard?.venue.venueId.trim()) {
+                  setDashboardError(null);
+                  setExportError(null);
+                  setLoadProgress(null);
+                  setActiveTab("papers");
+                }
                 window.sessionStorage.setItem(VENUE_STORAGE_KEY, value);
               }}
               recentVenueIds={recentVenueIds}
               stats={
-                dashboard
+                loadedDashboard
                   ? {
-                      papers: dashboard.summary.totalPapers,
-                      areaChairs: dashboard.areaChairs.length
+                      papers: loadedDashboard.summary.totalPapers,
+                      areaChairs: loadedDashboard.areaChairs.length
                     }
                   : undefined
               }
@@ -647,7 +700,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
 
           {dashboardError ? <div className="error-banner">{dashboardError}</div> : null}
 
-          {viewer && dashboard ? (
+          {viewer && loadedDashboard ? (
             <>
               <div className="panel-stack">
                 {selectedTab === "papers" ? (
@@ -655,26 +708,31 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
                     exportError={exportError}
                     isExporting={isExporting}
                     onExport={() => void handleExport()}
-                    papers={dashboard.papers}
-                    venueStage={dashboard.venue.stage}
-                    withdrawnPapers={dashboard.withdrawnPapers ?? []}
+                    papers={loadedDashboard.papers}
+                    venueStage={loadedDashboard.venue.stage}
+                    withdrawnPapers={loadedDashboard.withdrawnPapers ?? []}
                   />
                 ) : null}
                 {selectedTab === "ac" ? (
-                  <ACDashboardPanel areaChairs={dashboard.areaChairs} papers={dashboard.papers} />
+                  <ACDashboardPanel areaChairs={loadedDashboard.areaChairs} papers={loadedDashboard.papers} />
                 ) : null}
                 {selectedTab === "alerts" ? (
                   <AlertsPanel
-                    alerts={dashboard.alerts}
-                    areaChairs={dashboard.areaChairs}
-                    papers={dashboard.papers}
+                    alerts={loadedDashboard.alerts}
+                    areaChairs={loadedDashboard.areaChairs}
+                    key={loadedDashboard.venue.venueId}
+                    papers={loadedDashboard.papers}
                   />
                 ) : null}
                 {selectedTab === "comments" ? (
-                  <CommentsPanel comments={dashboard.comments} papers={dashboard.papers} />
+                  <CommentsPanel
+                    comments={loadedDashboard.comments}
+                    key={loadedDashboard.venue.venueId}
+                    papers={loadedDashboard.papers}
+                  />
                 ) : null}
                 {selectedTab === "analytics" ? (
-                  <AnalyticsPanel analytics={dashboard.analytics} papers={dashboard.papers} />
+                  <AnalyticsPanel analytics={loadedDashboard.analytics} papers={loadedDashboard.papers} />
                 ) : null}
               </div>
             </>

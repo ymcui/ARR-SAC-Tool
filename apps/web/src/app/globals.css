@@ -1794,6 +1794,72 @@ select {
   gap: 0.55rem;
 }
 
+.score-statistics-surface {
+  align-content: start;
+  grid-column: 1 / -1;
+}
+
+.score-statistics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.score-statistics-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(87, 112, 170, 0.14);
+  border-radius: 1.15rem;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.score-statistics-table {
+  width: 100%;
+  min-width: 27rem;
+  border-collapse: collapse;
+}
+
+.score-statistics-table th,
+.score-statistics-table td {
+  padding: 0.78rem 0.85rem;
+  border-bottom: 1px solid rgba(87, 112, 170, 0.12);
+  text-align: right;
+}
+
+.score-statistics-table thead th {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.score-statistics-table th:first-child {
+  text-align: left;
+}
+
+.score-statistics-table tbody th {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.score-statistics-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.score-statistics-table tbody td {
+  color: var(--ink);
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-statistics-table tbody tr:last-child th,
+.score-statistics-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 @media (max-width: 1200px) {
   .paper-type-chart-body {
     grid-template-columns: 1fr;
@@ -1953,6 +2019,10 @@ select {
   .comments-type-field {
     width: min(24rem, 100%);
     flex: 0 1 24rem;
+  }
+
+  .score-statistics-grid {
+    grid-template-columns: 1fr;
   }
 }
 

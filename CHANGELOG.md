@@ -2,6 +2,34 @@
 
 All notable user-facing changes are documented here.
 
+## [2.7.0] - 2026-07-10
+
+### Added
+
+- Added score statistics for overall assessment, excitement, soundness, and reviewer confidence, including minimum, maximum, average, and median values.
+
+### Changed
+
+- Reorganized Analytics into a full-width score-statistics row followed by two rows of paired charts.
+
+## [2.6.1] - 2026-07-10
+
+### Changed
+
+- Scoped ARR submission and reply loading to the signed-in SAC's assigned paper numbers before fetching detailed forum data.
+- Upgraded Next.js to 16.2.10 and replaced the build-time API rewrite with a runtime proxy that respects production host and port settings.
+- Embedded the empty-state illustration directly in the interface so it remains crisp and self-contained.
+
+### Fixed
+
+- Rejected blank credential submissions without falling back to environment credentials, reported MFA and upstream login failures accurately, and preserved an existing session when a replacement login fails.
+- Added OpenReview request deadlines, bounded duplicate-load waits, proactive session and cache cleanup, and secure cookies for HTTPS and forwarded HTTPS deployments.
+- Prevented missing commitment links, unavailable forums, reply failures, and assignment-group failures from producing or caching incomplete dashboards.
+- Kept assigned papers with no area chair visible as `Unassigned` instead of silently dropping them.
+- Blocked images embedded in OpenReview-authored Markdown to prevent automatic requests to remote or local URLs.
+- Cleared stale venue data and filters, recovered dashboard loads after proxy and invalid-body failures, bounded pending requests, and kept the client session intact when logout fails.
+- Made Python environment validation version-aware, added Windows-compatible interpreter paths, returned nonzero startup failures, and corrected the Colab background startup flow.
+
 ## [2.6.0] - 2026-07-09
 
 ### Added

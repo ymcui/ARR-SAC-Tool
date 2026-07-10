@@ -412,6 +412,52 @@ describe("DashboardShell", () => {
     ).toHaveLength(2);
   });
 
+  it("recovers an initial load after a proxy 5xx response with a non-JSON body", async () => {
+    let currentLoadId: string | null = null;
+    let dashboardCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === GITHUB_PACKAGE_URL) {
+        return createResponse({ version: "2.1.2" });
+      }
+      if (apiRequestPath(url) === "/api/session/login") {
+        return createResponse(dashboardFixture.viewer);
+      }
+      if (apiRequestPath(url).startsWith("/api/dashboard/progress")) {
+        return createResponse({
+          venueId: dashboardFixture.venue.venueId,
+          loadId: currentLoadId,
+          phase: "ready",
+          message: "Loaded workspace.",
+          current: 1,
+          total: 1,
+          done: true,
+          error: null
+        });
+      }
+      if (apiRequestPath(url).startsWith("/api/dashboard?")) {
+        dashboardCalls += 1;
+        currentLoadId = new URL(url, "http://localhost").searchParams.get("loadId");
+        return dashboardCalls === 1
+          ? createResponse("<html>Bad gateway</html>", false, 502)
+          : createResponse(dashboardFixture);
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(createElement(DashboardShell));
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+
+    expect(await screen.findByRole("button", { name: "42" })).toBeInTheDocument();
+    expect(dashboardCalls).toBe(2);
+  });
+
   it("shows actionable guidance when a disconnected dashboard load cannot be recovered", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -499,6 +545,51 @@ describe("DashboardShell", () => {
     await user.type(input, "aclweb.org/ACL/2026/Conference");
 
     expect(screen.getByText("Commitment Stage")).toBeInTheDocument();
+  });
+
+  it("hides loaded data when the venue input no longer matches it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock(createResponse(dashboardFixture.viewer), createResponse(dashboardFixture))
+    );
+    render(createElement(DashboardShell));
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+    expect(await screen.findByRole("button", { name: "42" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Venue ID"), "-different");
+
+    expect(screen.queryByRole("button", { name: "42" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Papers" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the client session when logout fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock(
+        createResponse(dashboardFixture.viewer),
+        createResponse(dashboardFixture),
+        createResponse({}, false, 503)
+      )
+    );
+    render(createElement(DashboardShell));
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /^login$/i }));
+    await user.type(screen.getByLabelText(/openreview email/i), "demo@example.com");
+    await user.type(screen.getByLabelText(/password/i), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in to openreview/i }));
+    await user.click(await screen.findByRole("button", { name: /load \/ refresh/i }));
+    await user.click(await screen.findByRole("button", { name: /^logout$/i }));
+
+    expect(await screen.findByText(/could not sign out/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^logout$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "42" })).toBeInTheDocument();
   });
 
   it("omits the AC Dashboard tab for commitment stage dashboards", async () => {

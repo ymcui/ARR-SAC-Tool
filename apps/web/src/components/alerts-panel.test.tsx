@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AlertsPanel } from "@/components/alerts-panel";
@@ -161,6 +161,40 @@ describe("AlertsPanel", () => {
   it("renders an empty state when there are no alerts", () => {
     renderAlertsPanel([]);
     expect(screen.getByText(/no review alerts need attention/i)).toBeInTheDocument();
+  });
+
+  it("does not load images embedded in OpenReview-authored Markdown", async () => {
+    const user = userEvent.setup();
+    const alerts = structuredClone(alertsFixture);
+    alerts[0].items[0].content = "Text before ![tracking](http://127.0.0.1:9000/pixel) text after";
+    renderAlertsPanel(alerts);
+
+    await user.click(screen.getByRole("button", { name: "88" }));
+
+    expect(screen.getByText(/text before/i)).toBeInTheDocument();
+    expect(document.querySelector("img")).not.toBeInTheDocument();
+  });
+
+  it("resets a type filter that is unavailable after the data changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      createElement(AlertsPanel, {
+        alerts: alertsFixture,
+        areaChairs: areaChairsFixture,
+        papers: papersFixture
+      })
+    );
+    await user.selectOptions(screen.getByLabelText("Type"), "Emergency Declaration");
+
+    rerender(
+      createElement(AlertsPanel, {
+        alerts: [alertsFixture[0]],
+        areaChairs: areaChairsFixture,
+        papers: papersFixture
+      })
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("Type")).toHaveValue("all"));
   });
 
   it("renders a compact alert table and expands alert details", async () => {

@@ -90,6 +90,16 @@ def test_missing_reviewer_group_defaults_to_zero_expected_reviews() -> None:
     assert second_paper.expectedReviews == 0
 
 
+def test_missing_area_chair_remains_visible_as_unassigned() -> None:
+    snapshot = load_fixture()
+    snapshot["submissions"][0]["area_chairs"] = []
+
+    response = build_dashboard_response(snapshot, "aclweb.org/ACL/ARR/2026/March")
+
+    first_paper = next(paper for paper in response.papers if paper.paperNumber == 42)
+    assert first_paper.areaChair == "Unassigned"
+
+
 def test_non_arr_venue_is_marked_as_commitment_stage() -> None:
     snapshot = load_fixture()
 

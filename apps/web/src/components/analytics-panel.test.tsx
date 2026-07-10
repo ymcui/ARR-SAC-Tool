@@ -103,11 +103,14 @@ describe("AnalyticsPanel", () => {
     expect(screen.getByText("Completed reviews per paper")).toBeInTheDocument();
     const scoreDistributionHeading = screen.getByText("Overall and reviewer score distributions");
     const individualOverallHeading = screen.getByText("Individual overall scores");
+    const scoreStatisticsHeading = screen.getByRole("heading", { name: "Score statistics" });
     const metaReviewHeading = screen.getByText("Meta-review and confidence score distribution");
     const scatterHeading = screen.getByText("Meta-review score vs overall assessment");
 
     expect(scoreDistributionHeading).toBeInTheDocument();
     expect(individualOverallHeading).toBeInTheDocument();
+    expect(scoreStatisticsHeading.closest(".score-statistics-surface")).toBeInTheDocument();
+    expect(scoreStatisticsHeading.compareDocumentPosition(scoreDistributionHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(scoreDistributionHeading.compareDocumentPosition(individualOverallHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(individualOverallHeading.compareDocumentPosition(metaReviewHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(metaReviewHeading.compareDocumentPosition(scatterHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
@@ -116,6 +119,8 @@ describe("AnalyticsPanel", () => {
     expect(within(screen.getByLabelText("Score series")).getByText("Soundness")).toBeInTheDocument();
     expect(within(screen.getByLabelText("Score series")).getByText("Confidence")).toBeInTheDocument();
     expect(within(screen.getByLabelText("Individual overall score series")).getByText("Reviews")).toBeInTheDocument();
+    expect(screen.queryByText("At a glance")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Calculated from each paper/)).not.toBeInTheDocument();
     expect(metaReviewHeading).toBeInTheDocument();
     expect(within(screen.getByLabelText("Meta-review series")).getByText("Meta-review")).toBeInTheDocument();
     expect(within(screen.getByLabelText("Meta-review series")).queryByText("Confidence")).not.toBeInTheDocument();
@@ -123,6 +128,60 @@ describe("AnalyticsPanel", () => {
     expect(screen.getByText("0 reviews: 1 paper (33%)")).toBeInTheDocument();
     expect(screen.getByText("2 (67%)")).toBeInTheDocument();
     expect(screen.getByText("1 (33%)")).toBeInTheDocument();
+  });
+
+  it("shows min, max, average, and median for the four reviewer score series", () => {
+    render(createElement(AnalyticsPanel, { analytics: analyticsFixture, papers: papersFixture }));
+
+    const overallTable = screen.getByRole("table", { name: "Overall and excitement score statistics" });
+    const reviewerTable = screen.getByRole("table", { name: "Soundness and confidence score statistics" });
+    const overallRow = within(overallTable).getByRole("row", { name: /Overall/ });
+    const excitementRow = within(overallTable).getByRole("row", { name: /Excitement/ });
+    const soundnessRow = within(reviewerTable).getByRole("row", { name: /Soundness/ });
+    const confidenceRow = within(reviewerTable).getByRole("row", { name: /Confidence/ });
+
+    expect(within(overallTable).getByRole("columnheader", { name: "Min" })).toBeInTheDocument();
+    expect(within(overallTable).getByRole("columnheader", { name: "Max" })).toBeInTheDocument();
+    expect(within(overallTable).getByRole("columnheader", { name: "Average" })).toBeInTheDocument();
+    expect(within(overallTable).getByRole("columnheader", { name: "Median" })).toBeInTheDocument();
+    expect(within(overallRow).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "3.00",
+      "4.00",
+      "3.50",
+      "3.50"
+    ]);
+    expect(within(excitementRow).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "3.00",
+      "4.00",
+      "3.50",
+      "3.50"
+    ]);
+    expect(within(soundnessRow).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "3.00",
+      "4.00",
+      "3.50",
+      "3.50"
+    ]);
+    expect(within(confidenceRow).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "3.00",
+      "4.00",
+      "3.50",
+      "3.50"
+    ]);
+  });
+
+  it("shows unavailable statistics when a score series has no values", () => {
+    render(createElement(AnalyticsPanel, { analytics: analyticsFixture, papers: [papersFixture[0]] }));
+
+    const overallTable = screen.getByRole("table", { name: "Overall and excitement score statistics" });
+    const overallRow = within(overallTable).getByRole("row", { name: /Overall/ });
+
+    expect(within(overallRow).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "—",
+      "—",
+      "—",
+      "—"
+    ]);
   });
 
   it("shows meta-review confidence only when meta-review confidence scores are available", () => {

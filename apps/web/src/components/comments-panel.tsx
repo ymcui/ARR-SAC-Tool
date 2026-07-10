@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -65,7 +65,9 @@ function CommentThread({ comment, depth = 0 }: { comment: CommentRecord; depth?:
       </a>
 
       <div className="thread-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{comment.content}</ReactMarkdown>
+        <ReactMarkdown components={{ img: () => null }} remarkPlugins={[remarkGfm]}>
+          {comment.content}
+        </ReactMarkdown>
       </div>
 
       {comment.children.length > 0 ? (
@@ -126,6 +128,12 @@ export function CommentsPanel({ comments, papers = [] }: CommentsPanelProps) {
     () => [...new Set(comments.flatMap((group) => group.items.flatMap(flattenTypes)))].sort(),
     [comments]
   );
+
+  useEffect(() => {
+    if (typeFilter !== "all" && !types.includes(typeFilter)) {
+      setTypeFilter("all");
+    }
+  }, [typeFilter, types]);
 
   const filteredGroups = useMemo<DisplayCommentGroup[]>(
     () =>

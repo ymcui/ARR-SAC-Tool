@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import faulthandler
 import logging
 import os
 import platform
 import time
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -15,14 +17,29 @@ from app.services.dashboard_logic import build_dashboard_response
 from app.services.export_xlsx import XLSX_MEDIA_TYPE, build_dashboard_export_xlsx, export_filename
 from app.services.openreview_gateway import (
     AuthenticationError,
+    AuthenticationMfaRequired,
+    AuthenticationServiceError,
     DashboardFetchError,
     OpenReviewGateway,
 )
 from app.session_store import SessionStore
 
 SESSION_COOKIE_NAME = "arr_sac_session"
+DASHBOARD_LOAD_WAIT_TIMEOUT_SECONDS = 5 * 60
+SESSION_PRUNE_INTERVAL_SECONDS = 60
 logger = logging.getLogger(__name__)
 faulthandler.enable()
+
+
+def secure_session_cookie(request: Request) -> bool:
+    configured = os.getenv("ARR_SAC_COOKIE_SECURE", "").strip().lower()
+    if configured in {"1", "true", "yes"}:
+        return True
+    if configured in {"0", "false", "no"}:
+        return False
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
 
 
 def configured_cors_origins() -> list[str]:
@@ -48,9 +65,30 @@ def create_app(
     gateway: Optional[OpenReviewGateway] = None,
     session_store: Optional[SessionStore] = None,
 ) -> FastAPI:
-    app = FastAPI(title="ARR SAC Dashboard API", version="0.1.0")
+    sessions = session_store or SessionStore()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        stop_pruning = asyncio.Event()
+
+        async def prune_sessions() -> None:
+            while not stop_pruning.is_set():
+                try:
+                    await asyncio.wait_for(stop_pruning.wait(), timeout=SESSION_PRUNE_INTERVAL_SECONDS)
+                except asyncio.TimeoutError:
+                    sessions.prune()
+
+        prune_task = asyncio.create_task(prune_sessions())
+        try:
+            yield
+        finally:
+            stop_pruning.set()
+            await prune_task
+            sessions.close_all()
+
+    app = FastAPI(title="ARR SAC Dashboard API", version="0.1.0", lifespan=lifespan)
     app.state.gateway = gateway or OpenReviewGateway()
-    app.state.sessions = session_store or SessionStore()
+    app.state.sessions = sessions
 
     app.add_middleware(
         CORSMiddleware,
@@ -72,21 +110,25 @@ def create_app(
     @app.post("/api/session/login", response_model=ViewerInfo)
     def login(payload: LoginRequest, request: Request, response: Response) -> ViewerInfo:
         existing_session = request.cookies.get(SESSION_COOKIE_NAME)
-        if existing_session:
-            app.state.sessions.delete_session(existing_session)
 
         try:
             client, viewer = app.state.gateway.authenticate(payload.username, payload.password)
         except AuthenticationError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except AuthenticationMfaRequired as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AuthenticationServiceError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+        if existing_session:
+            app.state.sessions.delete_session(existing_session)
         session_id = app.state.sessions.create_session(client=client, viewer=viewer)
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
             value=session_id,
             httponly=True,
             samesite="lax",
-            secure=False,
+            secure=secure_session_cookie(request),
             path="/",
         )
         return viewer
@@ -96,7 +138,13 @@ def create_app(
         session_id = request.cookies.get(SESSION_COOKIE_NAME)
         if session_id:
             app.state.sessions.delete_session(session_id)
-        response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+        response.delete_cookie(
+            key=SESSION_COOKIE_NAME,
+            path="/",
+            httponly=True,
+            samesite="lax",
+            secure=secure_session_cookie(request),
+        )
         return {"status": "ok"}
 
     @app.get("/api/dashboard", response_model=DashboardResponse)
@@ -168,7 +216,11 @@ def create_app(
                 venueId,
                 time.time() - dashboard_load.started_at,
             )
-            dashboard_load.event.wait()
+            if not dashboard_load.event.wait(timeout=DASHBOARD_LOAD_WAIT_TIMEOUT_SECONDS):
+                raise HTTPException(
+                    status_code=504,
+                    detail="The dashboard load is still running. Try again in a moment.",
+                )
 
             cached = app.state.sessions.get_cached_dashboard(session_id, venueId)
             if cached is not None:
@@ -209,6 +261,12 @@ def create_app(
                 load_error_status = 400
                 set_progress("error", load_error, 0, 0, done=True, error=load_error)
                 raise HTTPException(status_code=400, detail=load_error) from exc
+            except Exception as exc:
+                logger.exception("Unhandled dashboard fetch error for venue %s", venueId)
+                load_error = "The dashboard could not be loaded from OpenReview."
+                load_error_status = 502
+                set_progress("error", load_error, 0, 0, done=True, error=load_error)
+                raise HTTPException(status_code=502, detail=load_error) from exc
 
             try:
                 logger.warning("Building dashboard response for venue %s", venueId)

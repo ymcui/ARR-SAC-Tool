@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { CommentsPanel } from "@/components/comments-panel";
@@ -160,5 +160,29 @@ describe("CommentsPanel", () => {
     await user.click(screen.getByRole("button", { name: /paper 10145 gptzero result scope 1 post/i }));
 
     expect(screen.getByText("GPTZero result requires SAC attention.")).toBeInTheDocument();
+  });
+
+  it("does not load images embedded in OpenReview-authored Markdown", async () => {
+    const user = userEvent.setup();
+    const comments = structuredClone(commentsFixture);
+    comments[0].items[0].content = "Text before ![tracking](http://127.0.0.1:9000/pixel) text after";
+    render(createElement(CommentsPanel, { comments }));
+
+    await user.click(
+      screen.getByRole("button", { name: /paper 42 a careful study of reviewer discussion dynamics 2 posts/i })
+    );
+
+    expect(screen.getByText(/text before/i)).toBeInTheDocument();
+    expect(document.querySelector("img")).not.toBeInTheDocument();
+  });
+
+  it("resets a type filter that is unavailable after the data changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(createElement(CommentsPanel, { comments: commentsFixture }));
+    await user.selectOptions(screen.getByLabelText("Type"), "Confidential Comment");
+
+    rerender(createElement(CommentsPanel, { comments: [commentsFixture[0]] }));
+
+    await waitFor(() => expect(screen.getByLabelText("Type")).toHaveValue("all"));
   });
 });

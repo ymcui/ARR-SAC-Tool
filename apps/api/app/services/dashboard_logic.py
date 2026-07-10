@@ -83,11 +83,8 @@ def build_dashboard_response(
         if _is_withdrawn(submission) or _is_desk_rejected(submission):
             continue
 
-        area_chairs = submission.get("area_chairs") or []
-        if not area_chairs:
-            continue
-
-        paper = _build_paper_record(submission, area_chairs[0])
+        area_chairs = submission.get("area_chairs") or ["Unassigned"]
+        paper = _build_paper_record(submission, area_chairs[0] or "Unassigned")
         papers.append(paper)
         scanned_replies += len(submission.get("replies", []) or [])
         alert_thread_note_ids = _collect_alert_thread_note_ids(submission) if should_collect_alerts else set()

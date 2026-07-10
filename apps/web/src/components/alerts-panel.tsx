@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useDeferredValue, useMemo, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -97,7 +97,9 @@ function AlertThread({ alert, depth = 0 }: { alert: AlertRecord; depth?: number 
       </a>
 
       <div className="thread-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{alert.content}</ReactMarkdown>
+        <ReactMarkdown components={{ img: () => null }} remarkPlugins={[remarkGfm]}>
+          {alert.content}
+        </ReactMarkdown>
       </div>
 
       {alert.children.length > 0 ? (
@@ -236,6 +238,11 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
     () => [...new Set(alerts.flatMap((group) => group.items.flatMap(flattenTypes)))].sort(),
     [alerts]
   );
+  useEffect(() => {
+    if (typeFilter !== "all" && !types.includes(typeFilter)) {
+      setTypeFilter("all");
+    }
+  }, [typeFilter, types]);
   const { readyAlertPapers, totalAlertPapers, totalDelayCount, totalEmergencyCount } = useMemo(
     () => ({
       readyAlertPapers: alerts.reduce((total, group) => {

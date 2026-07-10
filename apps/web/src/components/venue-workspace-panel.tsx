@@ -41,6 +41,8 @@ function formatPhase(phase: string) {
       return "Submissions";
     case "scope":
       return "SAC scope";
+    case "replies":
+      return "Replies";
     case "papers":
       return "Paper scan";
     case "groups":

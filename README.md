@@ -203,3 +203,6 @@ Open the `https://....trycloudflare.com` URL printed by `cloudflared`. Keep both
 
 As ARR and *ACL conferences are making updates to processes and tools, the provided tools may not fully adapt to any ARR cycle or commitment stage. If you encounter any issues or have suggestions for improvement, please feel free to open an issue in this repository.
 
+## Miscellaneous
+
+I would not call myself as a veteran senior area chair for ARR, but I am grateful that ACL 2026 recognized me as an ["Outstanding Senior Area Chair"](https://2026.aclweb.org/program/outstanding_sacs/). I hope this tool can help other SACs to manage their workload more efficiently and effectively.
