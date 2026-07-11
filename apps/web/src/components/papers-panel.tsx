@@ -11,6 +11,7 @@ type PapersPanelProps = {
   isExporting?: boolean;
   onExport?: () => void;
   papers: PaperRecord[];
+  totalPapers?: number;
   venueStage?: VenueStage;
   withdrawnPapers: WithdrawnPaperRecord[];
 };
@@ -136,11 +137,9 @@ function compareReviewProgress(
   rightExpected: number,
   direction: SortDirection
 ) {
-  const reviewDirection = direction === "desc" ? "asc" : "desc";
-
   return (
-    compareNullableNumber(leftCompleted, rightCompleted, reviewDirection) ||
-    compareNullableNumber(leftExpected, rightExpected, reviewDirection)
+    compareNullableNumber(leftCompleted, rightCompleted, direction) ||
+    compareNullableNumber(leftExpected, rightExpected, direction)
   );
 }
 
@@ -240,6 +239,7 @@ export function PapersPanel({
   isExporting,
   onExport,
   papers,
+  totalPapers = papers.length,
   venueStage = "ARR Stage",
   withdrawnPapers
 }: PapersPanelProps) {
@@ -396,7 +396,12 @@ export function PapersPanel({
       <div className="section-header papers-panel-header">
         <div>
           <p className="eyebrow">Paper workspace</p>
-          <h2>Papers</h2>
+          <div className="panel-title-row">
+            <h2>Papers</h2>
+            <span aria-label={`${totalPapers} papers`} className="title-count-pill">
+              {totalPapers}
+            </span>
+          </div>
         </div>
         <div className="papers-header-controls">
           {isCommitmentStage ? (

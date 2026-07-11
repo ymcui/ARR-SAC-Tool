@@ -12,6 +12,7 @@ import type { CommentGroup, CommentRecord, PaperRecord } from "@/lib/types";
 type CommentsPanelProps = {
   comments: CommentGroup[];
   papers?: PaperRecord[];
+  totalComments?: number;
 };
 
 type CommentFilters = {
@@ -116,7 +117,7 @@ function formatPostCount(count: number) {
   return `${count} ${count === 1 ? "post" : "posts"}`;
 }
 
-export function CommentsPanel({ comments, papers = [] }: CommentsPanelProps) {
+export function CommentsPanel({ comments, papers = [], totalComments }: CommentsPanelProps) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(() => new Set());
@@ -158,6 +159,8 @@ export function CommentsPanel({ comments, papers = [] }: CommentsPanelProps) {
   );
 
   const isEmptyDataset = comments.length === 0;
+  const resolvedTotalComments =
+    totalComments ?? comments.reduce((total, group) => total + countComments(group.items), 0);
 
   function togglePaperThread(paperId: string) {
     setExpandedPaperIds((currentIds) => {
@@ -178,7 +181,12 @@ export function CommentsPanel({ comments, papers = [] }: CommentsPanelProps) {
       <div className="section-header comments-panel-header">
         <div>
           <p className="eyebrow">Exception handling</p>
-          <h2>Comments</h2>
+          <div className="panel-title-row">
+            <h2>Comments</h2>
+            <span aria-label={`${resolvedTotalComments} comments`} className="title-count-pill">
+              {resolvedTotalComments}
+            </span>
+          </div>
         </div>
         <div className="comments-header-controls">
           <label className="field compact comments-search-field">
@@ -240,18 +248,18 @@ export function CommentsPanel({ comments, papers = [] }: CommentsPanelProps) {
                     {group.overallScoreLabel ? (
                       <span className="paper-thread-score-context">{group.overallScoreLabel}</span>
                     ) : null}
+                    <span className="paper-thread-breakdown" aria-label="Comment type breakdown">
+                      {group.typeBreakdown.map(([type, count]) => (
+                        <span
+                          className={`paper-thread-breakdown-item ${commentTypeClassName(type)}`}
+                          key={type}
+                        >
+                          {type}: {count}
+                        </span>
+                      ))}
+                    </span>
                   </p>
                   <h3 className="paper-thread-title">{group.displayTitle}</h3>
-                  <span className="paper-thread-breakdown" aria-label="Comment type breakdown">
-                    {group.typeBreakdown.map(([type, count]) => (
-                      <span
-                        className={`paper-thread-breakdown-item ${commentTypeClassName(type)}`}
-                        key={type}
-                      >
-                        {type}: {count}
-                      </span>
-                    ))}
-                  </span>
                 </div>
                 <span className="paper-thread-summary">
                   <span>{formatPostCount(group.postCount)}</span>

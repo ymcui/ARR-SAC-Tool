@@ -11,6 +11,7 @@ import openreview
 import requests
 
 from app.schemas import ViewerInfo
+from app.session_store import DEFAULT_SESSION_TTL_SECONDS
 
 OPENREVIEW_BASE_URL = "https://api2.openreview.net"
 OPENREVIEW_FORUM_URL = "https://openreview.net/forum?id={paper_id}"
@@ -40,6 +41,52 @@ class DashboardFetchError(Exception):
     pass
 
 
+class DashboardAuthenticationError(DashboardFetchError):
+    pass
+
+
+def _exception_status(exc: BaseException) -> int | None:
+    response = getattr(exc, "response", None)
+    response_status = getattr(response, "status_code", None)
+    if isinstance(response_status, int):
+        return response_status
+
+    pending: List[Any] = list(getattr(exc, "args", ()))
+    while pending:
+        value = pending.pop(0)
+        if isinstance(value, dict):
+            for key in ("status", "statusCode", "status_code"):
+                status = value.get(key)
+                if isinstance(status, int):
+                    return status
+                if isinstance(status, str) and status.isdigit():
+                    return int(status)
+            pending.extend(value.values())
+        elif isinstance(value, (list, tuple)):
+            pending.extend(value)
+
+    return None
+
+
+def _raise_if_authentication_error(exc: BaseException) -> None:
+    if isinstance(exc, DashboardAuthenticationError):
+        raise exc
+    if _exception_status(exc) == 401:
+        raise DashboardAuthenticationError("OpenReview session expired. Log in again.") from exc
+
+
+def _is_missing_group_error(exc: BaseException) -> bool:
+    if isinstance(exc, IndexError):
+        return True
+
+    status = _exception_status(exc)
+    if status is not None:
+        return status == 404
+
+    message = str(exc).lower()
+    return "group not found" in message or "group was not found" in message
+
+
 def _configure_client_timeouts(client: Any) -> None:
     session = getattr(client, "session", None)
     if session is None or getattr(session, "_arr_sac_timeout_configured", False):
@@ -52,7 +99,15 @@ def _configure_client_timeouts(client: Any) -> None:
             "timeout",
             (OPENREVIEW_CONNECT_TIMEOUT_SECONDS, OPENREVIEW_READ_TIMEOUT_SECONDS),
         )
-        return original_request(method, url, **kwargs)
+        response = original_request(method, url, **kwargs)
+        is_authenticated_api_request = bool(getattr(client, "token", None)) and url != getattr(
+            client,
+            "login_url",
+            None,
+        )
+        if is_authenticated_api_request and getattr(response, "status_code", None) == 401:
+            raise DashboardAuthenticationError("OpenReview session expired. Log in again.")
+        return response
 
     session.request = request_with_timeout
     session._arr_sac_timeout_configured = True
@@ -161,9 +216,13 @@ def _resolve_group_members(
         try:
             members = list(client.get_group(group_id).members)
         except requests.RequestException as exc:
+            _raise_if_authentication_error(exc)
             raise DashboardFetchError(f"Could not resolve assignment group '{group_id}'.") from exc
-        except Exception:
-            continue
+        except Exception as exc:
+            _raise_if_authentication_error(exc)
+            if _is_missing_group_error(exc):
+                continue
+            raise DashboardFetchError(f"Could not resolve assignment group '{group_id}'.") from exc
         if members or not continue_on_empty:
             return members
 
@@ -225,7 +284,8 @@ def _first_usable_email(values: Any) -> str:
 def _profile_group_email(client: Any, profile_id: str) -> str:
     try:
         group = client.get_group(profile_id)
-    except Exception:
+    except Exception as exc:
+        _raise_if_authentication_error(exc)
         return ""
 
     return _first_usable_email(_group_members(group))
@@ -281,7 +341,8 @@ def _preferred_email_edges(client: Any, invitation_id: str) -> Dict[str, str]:
             groupby="head",
             select="tail",
         )
-    except Exception:
+    except Exception as exc:
+        _raise_if_authentication_error(exc)
         logger.warning("Could not load preferred-email edges from %s", invitation_id, exc_info=True)
         return {}
 
@@ -306,11 +367,13 @@ def _lookup_area_chair_contact(
 ) -> Dict[str, str]:
     try:
         profile = client.get_profile(profile_id)
-    except Exception:
+    except Exception as exc:
+        _raise_if_authentication_error(exc)
         try:
             profiles = client.search_profiles(ids=[profile_id])
             profile = profiles[0] if profiles else None
-        except Exception:
+        except Exception as fallback_exc:
+            _raise_if_authentication_error(fallback_exc)
             profile = None
 
     if profile is None:
@@ -438,7 +501,11 @@ class OpenReviewGateway:
             response = client.session.post(
                 client.login_url,
                 headers=client.headers,
-                json={"id": normalized_username, "password": password, "expiresIn": None},
+                json={
+                    "id": normalized_username,
+                    "password": password,
+                    "expiresIn": DEFAULT_SESSION_TTL_SECONDS,
+                },
             )
         except requests.RequestException as exc:
             raise AuthenticationServiceError("Could not reach OpenReview. Try again in a moment.") from exc
@@ -513,6 +580,7 @@ class OpenReviewGateway:
                 venue_id,
             )
         except Exception as exc:
+            _raise_if_authentication_error(exc)
             raise DashboardFetchError(f"Could not load venue '{venue_id}'.") from exc
 
         profile = client.user.get("profile", {})
@@ -548,6 +616,7 @@ class OpenReviewGateway:
                 len(my_sac_groups),
             )
         except Exception as exc:
+            _raise_if_authentication_error(exc)
             raise DashboardFetchError(f"Could not load SAC assignments for venue '{venue_id}'.") from exc
 
         logger.warning("Resolved %s SAC groups for %s", len(my_sac_groups), viewer_id)
@@ -593,6 +662,7 @@ class OpenReviewGateway:
                                 len(assigned_numbers),
                             )
             except Exception as exc:
+                _raise_if_authentication_error(exc)
                 raise DashboardFetchError(f"Could not load assigned submissions for venue '{venue_id}'.") from exc
             logger.warning(
                 "Dashboard load phase assigned_submission_metadata completed in %.2fs for %s: assignments=%s submissions=%s",
@@ -701,6 +771,7 @@ class OpenReviewGateway:
                                 len(all_scoped_candidates),
                             )
             except Exception as exc:
+                _raise_if_authentication_error(exc)
                 raise DashboardFetchError(
                     f"Could not load replies for assigned submissions in venue '{venue_id}'."
                 ) from exc
@@ -767,7 +838,8 @@ class OpenReviewGateway:
                     bulk_groups_matched,
                     len(expected_group_ids),
                 )
-            except Exception:
+            except Exception as exc:
+                _raise_if_authentication_error(exc)
                 bulk_group_seconds = time.perf_counter() - bulk_group_started_at
                 logger.warning(
                     (
@@ -797,6 +869,7 @@ class OpenReviewGateway:
             try:
                 return list(client.get_group(group_id).members)
             except Exception as exc:
+                _raise_if_authentication_error(exc)
                 raise DashboardFetchError(f"Could not resolve assignment group '{group_id}'.") from exc
             finally:
                 fallback_group_lookup_seconds += time.perf_counter() - fallback_started_at
@@ -940,6 +1013,7 @@ class OpenReviewGateway:
                 len(commitment_notes),
             )
         except Exception as exc:
+            _raise_if_authentication_error(exc)
             raise DashboardFetchError(f"Could not load commitment paper entries for venue '{venue_id}'.") from exc
 
         try:
@@ -970,6 +1044,7 @@ class OpenReviewGateway:
                 has_venue_level_assignment,
             )
         except Exception as exc:
+            _raise_if_authentication_error(exc)
             raise DashboardFetchError(f"Could not load commitment assignments for venue '{venue_id}'.") from exc
 
         collected_submissions: List[Dict[str, Any]] = []
@@ -1037,7 +1112,8 @@ class OpenReviewGateway:
                     viewer_id,
                     len(commitment_groups_by_id),
                 )
-            except Exception:
+            except Exception as exc:
+                _raise_if_authentication_error(exc)
                 logger.warning(
                     "Dashboard load phase commitment_groups failed in %.2fs for %s; falling back to per-paper group lookups",
                     time.perf_counter() - phase_started_at,
@@ -1054,7 +1130,8 @@ class OpenReviewGateway:
 
             try:
                 forum_note = client.get_note(forum_id, details="replies")
-            except Exception:
+            except Exception as exc:
+                _raise_if_authentication_error(exc)
                 logger.warning(
                     "Skipping commitment entry %s because linked forum %s could not be loaded",
                     note_number,
@@ -1143,6 +1220,7 @@ class OpenReviewGateway:
                     try:
                         result = future.result()
                     except Exception as exc:
+                        _raise_if_authentication_error(exc)
                         candidate = future_to_candidate[future]
                         raise DashboardFetchError(
                             f"Could not load commitment entry {candidate['note_number']}."

@@ -1,17 +1,19 @@
 {
   "name": "arr-sac-dashboard",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "private": true,
   "scripts": {
     "predev": "node scripts/ensure-api-env.mjs",
     "dev": "node scripts/dev.mjs",
     "prestart": "node scripts/ensure-api-env.mjs",
     "start": "node scripts/start.mjs",
+    "predev:api": "node scripts/ensure-api-env.mjs",
     "dev:api": "node scripts/run-api-python.mjs -m uvicorn app.main:app --app-dir apps/api --host 127.0.0.1 --port 8001 --reload",
     "dev:web": "npm run dev --workspace @arr-sac/web",
     "build": "npm run build --workspace @arr-sac/web",
-    "test": "npm run test:api && npm run test:web",
+    "test": "npm run test:scripts && npm run test:api && npm run test:web",
     "test:api": "node scripts/ensure-api-env.mjs && node scripts/run-api-python.mjs -m pytest apps/api/tests",
+    "test:scripts": "node --test scripts/process-tree.test.mjs",
     "test:web": "npm run test --workspace @arr-sac/web -- --run"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ from app.services.openreview_gateway import (
     AuthenticationError,
     AuthenticationMfaRequired,
     AuthenticationServiceError,
+    DashboardAuthenticationError,
     DashboardFetchError,
     OpenReviewGateway,
 )
@@ -77,6 +78,42 @@ def test_authenticate_configures_timeout_and_populates_client(monkeypatch) -> No
     assert viewer.id == "~SAC1"
     assert client.headers["Authorization"] == "Bearer token"
     assert calls[0][2]["timeout"] == (10, 180)
+    assert calls[0][2]["json"]["expiresIn"] == 8 * 60 * 60
+
+
+def test_gateway_classifies_openreview_401_as_expired_session() -> None:
+    class ExpiredClient:
+        user = {"profile": {"id": "~SAC1", "fullname": "SAC One"}}
+
+        def get_group(self, group_id: str):
+            raise openreview_gateway.openreview.OpenReviewException(
+                {"name": "UnauthorizedError", "status": 401, "message": "Token expired"}
+            )
+
+    with pytest.raises(DashboardAuthenticationError, match="session expired"):
+        OpenReviewGateway().fetch_dashboard_snapshot(
+            ExpiredClient(),
+            "aclweb.org/ACL/ARR/2026/March",
+        )
+
+
+def test_configured_client_rejects_authenticated_http_401() -> None:
+    client = login_client(LoginResponse(401, {}))
+    client.token = "expired-token"
+    openreview_gateway._configure_client_timeouts(client)
+
+    with pytest.raises(DashboardAuthenticationError, match="session expired"):
+        client.session.request("GET", "https://api2.openreview.net/groups")
+
+
+def test_configured_client_leaves_explicit_login_401_for_authentication_mapping() -> None:
+    client = login_client(LoginResponse(401, {}))
+    client.token = "token-loaded-from-environment"
+    openreview_gateway._configure_client_timeouts(client)
+
+    response = client.session.post(client.login_url, json={"id": "wrong", "password": "wrong"})
+
+    assert response.status_code == 401
 
 
 def test_authenticate_maps_upstream_server_failure(monkeypatch) -> None:
@@ -620,6 +657,56 @@ def test_gateway_continues_commitment_area_chair_lookup_after_empty_bulk_group()
     assert snapshot["submissions"][0]["reviewers"] == ["~Reviewer1"]
 
 
+def test_commitment_group_fallback_continues_after_missing_alternative() -> None:
+    first_group = "aclweb.org/ACL/2026/Conference/Commitment42/Reviewers"
+    second_group = "aclweb.org/ACL/2026/Conference/Submission42/Reviewers"
+
+    class MissingAlternativeClient:
+        def __init__(self) -> None:
+            self.requests: list[str] = []
+
+        def get_group(self, group_id: str):
+            self.requests.append(group_id)
+            if group_id == first_group:
+                raise openreview_gateway.openreview.OpenReviewException(
+                    {"name": "NotFoundError", "status": 404, "message": "Group not found"}
+                )
+            return SimpleNamespace(members=["~ReviewerFallback"])
+
+    client = MissingAlternativeClient()
+
+    members = openreview_gateway._resolve_group_members(client, (first_group, second_group))
+
+    assert members == ["~ReviewerFallback"]
+    assert client.requests == [first_group, second_group]
+
+
+def test_commitment_group_fallback_fails_closed_on_upstream_outage() -> None:
+    first_group = "aclweb.org/ACL/2026/Conference/Commitment42/Reviewers"
+    second_group = "aclweb.org/ACL/2026/Conference/Submission42/Reviewers"
+
+    class UnavailableGroupClient:
+        def __init__(self) -> None:
+            self.requests: list[str] = []
+
+        def get_group(self, group_id: str):
+            self.requests.append(group_id)
+            raise openreview_gateway.openreview.OpenReviewException(
+                {
+                    "name": "InternalServerError",
+                    "status": 503,
+                    "message": "Group not found while the service is unavailable",
+                }
+            )
+
+    client = UnavailableGroupClient()
+
+    with pytest.raises(DashboardFetchError, match="Could not resolve assignment group"):
+        openreview_gateway._resolve_group_members(client, (first_group, second_group))
+
+    assert client.requests == [first_group]
+
+
 def test_gateway_skips_out_of_scope_commitment_entries_before_loading_forum() -> None:
     class CommitmentScopeClient:
         def __init__(self) -> None:
@@ -691,6 +778,10 @@ def test_gateway_uses_venue_level_area_chair_membership_for_commitment_stage() -
                 return SimpleNamespace(content={"submission_name": {"value": "Commitment"}})
             if group_id == "aclweb.org/ACL/2026/Conference/Commitment42/Reviewers":
                 return SimpleNamespace(members=[])
+            if group_id.endswith("/Area_Chairs"):
+                raise openreview_gateway.openreview.OpenReviewException(
+                    {"name": "NotFoundError", "status": 404, "message": "Group not found"}
+                )
             raise AssertionError(f"Unexpected group lookup: {group_id}")
 
         def get_all_groups(self, prefix: str, members: str | None = None):

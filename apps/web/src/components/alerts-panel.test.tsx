@@ -160,6 +160,7 @@ function getAlertPaperOrder() {
 describe("AlertsPanel", () => {
   it("renders an empty state when there are no alerts", () => {
     renderAlertsPanel([]);
+    expect(screen.getByLabelText("0 alerts")).toHaveTextContent("0");
     expect(screen.getByText(/no review alerts need attention/i)).toBeInTheDocument();
   });
 
@@ -206,6 +207,7 @@ describe("AlertsPanel", () => {
     const summary = screen.getByLabelText("Alerts summary");
     const dataRows = screen.getAllByRole("row").slice(1);
 
+    expect(screen.getByLabelText("3 alerts")).toHaveTextContent("3");
     expect(within(summary).getByText("Ready")).toBeInTheDocument();
     expect(within(summary).getByText("1/2")).toBeInTheDocument();
     expect(within(summary).getByText("Emergency")).toBeInTheDocument();
@@ -234,6 +236,21 @@ describe("AlertsPanel", () => {
     expect(screen.getByRole("link", { name: "Open forum" })).toBeInTheDocument();
   });
 
+  it("does not count Official Comment replies as alert declarations", () => {
+    renderAlertsPanel(
+      [
+        {
+          ...alertsFixture[1],
+          items: [alertsFixture[1].items[0]]
+        }
+      ],
+      [papersFixture[0]]
+    );
+
+    expect(screen.getByLabelText("1 alerts")).toHaveTextContent("1");
+    expect(screen.queryByLabelText("2 alerts")).not.toBeInTheDocument();
+  });
+
   it("sorts alert rows through clickable headers", async () => {
     renderAlertsPanel();
     const user = userEvent.setup();
@@ -251,11 +268,11 @@ describe("AlertsPanel", () => {
 
     await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
     expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "descending");
-    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "42" })).toBeInTheDocument();
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "88" })).toBeInTheDocument();
 
     await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
     expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "ascending");
-    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "88" })).toBeInTheDocument();
+    expect(within(screen.getAllByRole("row")[1]).getByRole("button", { name: "42" })).toBeInTheDocument();
 
     await user.click(within(screen.getByRole("columnheader", { name: /emergency/i })).getByRole("button"));
     expect(screen.getByRole("columnheader", { name: /emergency/i })).toHaveAttribute("aria-sort", "descending");
@@ -307,10 +324,10 @@ describe("AlertsPanel", () => {
     const user = userEvent.setup();
 
     await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
-    expect(getAlertPaperOrder()).toEqual([42, 88, 121]);
+    expect(getAlertPaperOrder()).toEqual([121, 88, 42]);
 
     await user.click(within(screen.getByRole("columnheader", { name: /reviews/i })).getByRole("button"));
-    expect(getAlertPaperOrder()).toEqual([121, 88, 42]);
+    expect(getAlertPaperOrder()).toEqual([42, 88, 121]);
   });
 
   it("filters table rows by alert type", async () => {

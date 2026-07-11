@@ -86,8 +86,16 @@ const papersFixture: PaperRecord[] = [
 ];
 
 describe("CommentsPanel", () => {
+  it("uses an explicit API comment total for the title pill", () => {
+    render(createElement(CommentsPanel, { comments: commentsFixture, totalComments: 19 }));
+
+    expect(screen.getByLabelText("19 comments")).toHaveTextContent("19");
+    expect(screen.queryByLabelText("3 comments")).not.toBeInTheDocument();
+  });
+
   it("renders an empty state when there are no comments", () => {
     render(createElement(CommentsPanel, { comments: [] }));
+    expect(screen.getByLabelText("0 comments")).toHaveTextContent("0");
     expect(screen.getByText(/no comments need attention/i)).toBeInTheDocument();
   });
 
@@ -95,6 +103,7 @@ describe("CommentsPanel", () => {
     render(createElement(CommentsPanel, { comments: commentsFixture }));
     const user = userEvent.setup();
 
+    expect(screen.getByLabelText("3 comments")).toHaveTextContent("3");
     expect(
       screen.getByRole("button", { name: /paper 42 a careful study of reviewer discussion dynamics 2 posts/i })
     ).toHaveAttribute("aria-expanded", "false");
@@ -104,6 +113,9 @@ describe("CommentsPanel", () => {
       screen.getByRole("button", { name: /paper 88 improving meta-review readiness signals 1 post/i })
     ).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText("Confidential Comment: 1")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Comment type breakdown")[0].parentElement).toHaveClass(
+      "paper-thread-eyebrow"
+    );
     expect(screen.queryByText("paper42")).not.toBeInTheDocument();
     expect(screen.queryByText("Please clarify the evaluation setup.")).not.toBeInTheDocument();
 

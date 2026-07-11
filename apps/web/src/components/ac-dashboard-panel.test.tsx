@@ -133,6 +133,9 @@ describe("ACDashboardPanel", () => {
     const table = screen.getByRole("table");
     const summary = screen.getByLabelText("AC dashboard summary");
 
+    expect(screen.getByLabelText(`${areaChairsFixture.length} area chairs`)).toHaveTextContent(
+      String(areaChairsFixture.length)
+    );
     expect(within(summary).getByText("Missing meta-reviews")).toBeInTheDocument();
     expect(within(summary).getByText("1")).toBeInTheDocument();
     expect(within(table).getAllByRole("img")).toHaveLength(4);
@@ -187,12 +190,12 @@ describe("ACDashboardPanel", () => {
     await user.click(screen.getByRole("button", { name: "Reviews" }));
 
     expect(screen.getByRole("columnheader", { name: /^Reviews$/i })).toHaveAttribute("aria-sort", "descending");
-    expect(areaChairOrder()).toEqual(["~Sort_TwoOfThree", "~Sort_TwoOfFive", "~Sort_ThreeOfFour"]);
+    expect(areaChairOrder()).toEqual(["~Sort_ThreeOfFour", "~Sort_TwoOfFive", "~Sort_TwoOfThree"]);
 
     await user.click(screen.getByRole("button", { name: "Reviews" }));
 
     expect(screen.getByRole("columnheader", { name: /^Reviews$/i })).toHaveAttribute("aria-sort", "ascending");
-    expect(areaChairOrder()).toEqual(["~Sort_ThreeOfFour", "~Sort_TwoOfFive", "~Sort_TwoOfThree"]);
+    expect(areaChairOrder()).toEqual(["~Sort_TwoOfThree", "~Sort_TwoOfFive", "~Sort_ThreeOfFour"]);
   });
 
   it("reveals assigned papers and their stats when clicking a table row", async () => {

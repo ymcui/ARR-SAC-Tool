@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from app.main import application_version, create_app
 from app.schemas import (
     DashboardResponse,
     PaperRecord,
@@ -25,6 +25,7 @@ from app.services.openreview_gateway import (
     AuthenticationError,
     AuthenticationMfaRequired,
     AuthenticationServiceError,
+    DashboardAuthenticationError,
 )
 from app.session_store import SessionStore
 
@@ -176,6 +177,66 @@ def test_unexpected_gateway_failure_finishes_progress_with_error() -> None:
     assert response.status_code == 502
     assert progress.json()["done"] is True
     assert progress.json()["error"] == "The dashboard could not be loaded from OpenReview."
+
+
+def test_expired_openreview_session_returns_401_and_deletes_local_session() -> None:
+    class TrackedClient:
+        def __init__(self) -> None:
+            self.closed = False
+            self.session = self
+
+        def close(self) -> None:
+            self.closed = True
+
+    tracked_client = TrackedClient()
+
+    class ExpiredGateway(FakeGateway):
+        def authenticate(self, username: str, password: str):
+            return tracked_client, ViewerInfo(id="~Test_SAC1", fullname="Test SAC")
+
+        def fetch_dashboard_snapshot(self, client, venue_id: str, progress_callback=None) -> dict:
+            raise DashboardAuthenticationError("OpenReview session expired. Log in again.")
+
+    sessions = SessionStore()
+    client = TestClient(create_app(gateway=ExpiredGateway(load_fixture()), session_store=sessions))
+    login = client.post(
+        "/api/session/login",
+        json={"username": "sac@example.com", "password": "password"},
+    )
+    assert login.status_code == 200
+    assert sessions.count() == 1
+
+    response = client.get(
+        "/api/dashboard",
+        params={"venueId": "aclweb.org/ACL/ARR/2026/March"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "OpenReview session expired. Log in again."
+    assert sessions.count() == 0
+    assert tracked_client.closed is True
+
+    progress = client.get(
+        "/api/dashboard/progress",
+        params={"venueId": "aclweb.org/ACL/ARR/2026/March"},
+    )
+    assert progress.status_code == 401
+
+
+def test_openapi_advertises_application_version() -> None:
+    client = TestClient(create_app(gateway=FakeGateway(load_fixture()), session_store=SessionStore()))
+    expected_version = json.loads((Path(__file__).parents[3] / "package.json").read_text())["version"]
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    assert response.json()["info"]["version"] == expected_version
+
+
+def test_application_version_supports_runtime_override(monkeypatch) -> None:
+    monkeypatch.setenv("ARR_SAC_APP_VERSION", "9.8.7")
+
+    assert application_version() == "9.8.7"
 
 
 def test_cors_allows_configured_local_web_port(monkeypatch) -> None:

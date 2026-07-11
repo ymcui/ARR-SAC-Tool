@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional
 from app.schemas import DashboardLoadProgress, DashboardResponse, ViewerInfo
 
 DASHBOARD_CACHE_VERSION = 11
+DEFAULT_SESSION_TTL_SECONDS = 8 * 60 * 60
 
 
 def _model_dump(model: Any) -> dict:
@@ -59,7 +60,7 @@ class SessionStore:
     def __init__(
         self,
         cache_ttl_seconds: int = 180,
-        session_ttl_seconds: int = 8 * 60 * 60,
+        session_ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS,
         progress_ttl_seconds: int = 10 * 60,
         clock: Callable[[], float] = time.time,
     ) -> None:

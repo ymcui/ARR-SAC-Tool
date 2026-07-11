@@ -70,13 +70,7 @@ As indicated above, Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your 
 
 <p align="center">
     <br>
-    <img src="./assets/1-login.png" width="400"/>
-    <br>
-</p>
-
-<p align="center">
-    <br>
-    <img src="./assets/2-venue.png" width="600"/>
+    <img src="./assets/1-login.png" width="600"/>
     <br>
 </p>
 

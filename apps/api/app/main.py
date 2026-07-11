@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import faulthandler
+import json
 import logging
 import os
 import platform
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -19,6 +21,7 @@ from app.services.openreview_gateway import (
     AuthenticationError,
     AuthenticationMfaRequired,
     AuthenticationServiceError,
+    DashboardAuthenticationError,
     DashboardFetchError,
     OpenReviewGateway,
 )
@@ -29,6 +32,21 @@ DASHBOARD_LOAD_WAIT_TIMEOUT_SECONDS = 5 * 60
 SESSION_PRUNE_INTERVAL_SECONDS = 60
 logger = logging.getLogger(__name__)
 faulthandler.enable()
+
+
+def application_version() -> str:
+    configured_version = os.getenv("ARR_SAC_APP_VERSION", "").strip()
+    if configured_version:
+        return configured_version
+
+    package_path = Path(__file__).resolve().parents[3] / "package.json"
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+        version = package.get("version")
+        return str(version) if version else "0.0.0"
+    except (OSError, ValueError, TypeError):
+        logger.warning("Could not read application version from %s", package_path, exc_info=True)
+        return "0.0.0"
 
 
 def secure_session_cookie(request: Request) -> bool:
@@ -86,7 +104,7 @@ def create_app(
             await prune_task
             sessions.close_all()
 
-    app = FastAPI(title="ARR SAC Dashboard API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="ARR SAC Dashboard API", version=application_version(), lifespan=lifespan)
     app.state.gateway = gateway or OpenReviewGateway()
     app.state.sessions = sessions
 
@@ -256,6 +274,11 @@ def create_app(
                     venueId,
                     progress_callback=set_progress,
                 )
+            except DashboardAuthenticationError as exc:
+                load_error = str(exc)
+                load_error_status = 401
+                app.state.sessions.delete_session(session_id)
+                raise HTTPException(status_code=401, detail=load_error) from exc
             except DashboardFetchError as exc:
                 load_error = str(exc)
                 load_error_status = 400

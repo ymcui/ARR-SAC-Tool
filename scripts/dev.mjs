@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 
+import { terminateProcessTree } from "./process-tree.mjs";
 import { apiPythonCommand } from "./python-command.mjs";
 
 const root = process.cwd();
@@ -50,6 +51,7 @@ const commands = [
 ];
 
 const children = new Map();
+const processTrees = new Map();
 let shuttingDown = false;
 let forcedKillTimer = null;
 let exitCode = 0;
@@ -85,30 +87,9 @@ function pipeOutput(stream, target, prefix) {
   });
 }
 
-function killChildProcess(child, signal) {
-  if (!child || child.exitCode !== null || child.killed) {
-    return;
-  }
-
-  try {
-    if (process.platform === "win32") {
-      child.kill(signal);
-    } else {
-      process.kill(-child.pid, signal);
-    }
-  } catch {
-    // Best-effort shutdown.
-  }
-}
-
 function finalizeIfDone() {
-  if (children.size !== 0) {
+  if (children.size !== 0 || forcedKillTimer) {
     return;
-  }
-
-  if (forcedKillTimer) {
-    clearTimeout(forcedKillTimer);
-    forcedKillTimer = null;
   }
 
   process.exit(exitCode);
@@ -125,17 +106,26 @@ function shutdown(signal) {
     exitCode = signal === "SIGINT" ? 130 : 143;
   }
 
-  for (const child of children.values()) {
-    killChildProcess(child, signal);
+  for (const [name, tree] of processTrees) {
+    const terminated = terminateProcessTree(tree, signal);
+    if (process.platform === "win32" && terminated) {
+      processTrees.delete(name);
+    }
+  }
+
+  if (processTrees.size === 0) {
+    finalizeIfDone();
+    return;
   }
 
   forcedKillTimer = setTimeout(() => {
-    for (const child of children.values()) {
-      killChildProcess(child, "SIGKILL");
+    for (const tree of processTrees.values()) {
+      terminateProcessTree(tree, "SIGKILL");
     }
+    processTrees.clear();
+    forcedKillTimer = null;
+    finalizeIfDone();
   }, 2000);
-
-  forcedKillTimer.unref();
 }
 
 function spawnCommand({ name, command, args, env = process.env }) {
@@ -147,6 +137,9 @@ function spawnCommand({ name, command, args, env = process.env }) {
   });
 
   children.set(name, child);
+  if (Number.isInteger(child.pid)) {
+    processTrees.set(name, { child, pid: child.pid });
+  }
 
   pipeOutput(child.stdout, process.stdout, name);
   pipeOutput(child.stderr, process.stderr, name);

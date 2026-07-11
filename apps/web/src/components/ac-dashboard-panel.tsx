@@ -89,11 +89,9 @@ function compareCountPair(
   rightExpected: number,
   direction: SortDirection
 ) {
-  const pairDirection = direction === "desc" ? "asc" : "desc";
-
   return (
-    compareNullableNumber(leftCompleted, rightCompleted, pairDirection) ||
-    compareNullableNumber(leftExpected, rightExpected, pairDirection)
+    compareNullableNumber(leftCompleted, rightCompleted, direction) ||
+    compareNullableNumber(leftExpected, rightExpected, direction)
   );
 }
 
@@ -239,7 +237,12 @@ export function ACDashboardPanel({ areaChairs, papers }: ACDashboardPanelProps) 
       <div className="section-header">
         <div>
           <p className="eyebrow">Rollup view</p>
-          <h2>AC Dashboard</h2>
+          <div className="panel-title-row">
+            <h2>Area Chairs</h2>
+            <span aria-label={`${areaChairs.length} area chairs`} className="title-count-pill">
+              {areaChairs.length}
+            </span>
+          </div>
         </div>
         <div className="ac-dashboard-header-controls">
           <div className="papers-summary-pills" aria-label="AC dashboard summary">

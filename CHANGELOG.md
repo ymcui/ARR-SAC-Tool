@@ -2,6 +2,42 @@
 
 All notable user-facing changes are documented here.
 
+## [2.8.0] - 2026-07-11
+
+### Added
+
+- Added an inline one-step OpenReview sign-in flow that authenticates and loads a venue from the same form.
+- Added an account menu with venue switching, recent-venue suggestions, refresh, and standalone logout controls.
+- Added title count pills for Papers, Area Chairs, Alerts, and Comments, plus a restored full-width venue-loading progress bar.
+
+### Changed
+
+- Removed the persistent venue panel, moved last-sync context into the header, renamed AC Dashboard to Area Chairs, and made the May 2026 ARR venue the default.
+- Redesigned and tightened the login, navigation, account, footer, and Comments layouts while preserving responsive behavior.
+
+### Fixed
+
+- Prevented account controls from rendering under workspace content, kept recent-venue suggestions hidden until interaction, and restored reliable logout behavior.
+- Prevented stale venue data and incorrect venue context during failed switches and retries, and avoided flashing the login form while restoring a saved session.
+- Corrected alert totals to count declarations rather than contextual replies, stopped failed progress bars from animating, and respected reduced-motion preferences.
+- Normalized navigation and username-control heights, constrained long viewer names, and moved keyboard focus into the account dialog when it opens.
+
+## [2.7.1] - 2026-07-11
+
+### Changed
+
+- Aligned OpenReview token lifetime with the local session lifetime and reported the package version through the API metadata.
+- Documented the supported Node.js version, made direct API development bootstrap its Python environment, and made Colab startup fail clearly when the app does not become ready.
+
+### Fixed
+
+- Expired OpenReview sessions now clear local state and consistently return users to login without swallowing upstream authentication failures.
+- Commitment-stage assignment-group outages now fail closed instead of silently producing incomplete dashboards.
+- Bounded dashboard, login, export, and progress requests across both headers and response bodies, stopped overlapping polls, and ignored stale load responses.
+- Corrected Reviews column sort direction across Papers, Alerts, and AC Dashboard tables.
+- Added keyboard navigation for recent venues and focus trapping, initial focus, and focus restoration for the login dialog.
+- Terminated complete development and production process trees on POSIX and Windows so reloaders and child servers do not keep ports open.
+
 ## [2.7.0] - 2026-07-10
 
 ### Added

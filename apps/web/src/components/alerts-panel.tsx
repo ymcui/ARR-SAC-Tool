@@ -192,11 +192,9 @@ function compareReviewProgress(
   rightExpected: number | null | undefined,
   direction: SortDirection
 ) {
-  const reviewDirection = direction === "desc" ? "asc" : "desc";
-
   return (
-    compareNullableNumber(leftCompleted, rightCompleted, reviewDirection) ||
-    compareNullableNumber(leftExpected, rightExpected, reviewDirection)
+    compareNullableNumber(leftCompleted, rightCompleted, direction) ||
+    compareNullableNumber(leftExpected, rightExpected, direction)
   );
 }
 
@@ -363,6 +361,7 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
   );
 
   const isEmptyDataset = alerts.length === 0;
+  const totalAlertDeclarations = totalDelayCount + totalEmergencyCount;
 
   function togglePaperThread(paperId: string) {
     setExpandedPaperId((currentPaperId) => (currentPaperId === paperId ? null : paperId));
@@ -373,7 +372,12 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
       <div className="section-header comments-panel-header">
         <div>
           <p className="eyebrow">Review chasing</p>
-          <h2>Alerts</h2>
+          <div className="panel-title-row">
+            <h2>Alerts</h2>
+            <span aria-label={`${totalAlertDeclarations} alerts`} className="title-count-pill">
+              {totalAlertDeclarations}
+            </span>
+          </div>
         </div>
         <div className="comments-header-controls alerts-header-controls">
           <div className="papers-summary-pills" aria-label="Alerts summary">

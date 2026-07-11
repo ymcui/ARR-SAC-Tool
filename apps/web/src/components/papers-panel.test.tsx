@@ -110,10 +110,26 @@ function getPaperOrder() {
 }
 
 describe("PapersPanel", () => {
+  it("uses an explicit API paper total for the title pill", () => {
+    render(
+      createElement(PapersPanel, {
+        papers: papersFixture,
+        totalPapers: 17,
+        withdrawnPapers: []
+      })
+    );
+
+    expect(screen.getByLabelText("17 papers")).toHaveTextContent("17");
+    expect(screen.queryByLabelText(`${papersFixture.length} papers`)).not.toBeInTheDocument();
+  });
+
   it("uses a simplified control bar and reveals the paper id only in the expanded row", async () => {
     renderPapersPanel();
     const user = userEvent.setup();
 
+    expect(screen.getByLabelText(`${papersFixture.length} papers`)).toHaveTextContent(
+      String(papersFixture.length)
+    );
     expect(screen.queryAllByRole("combobox")).toHaveLength(0);
     expect(screen.getByPlaceholderText("Search paper #, AC, or type")).toBeInTheDocument();
     expect(screen.queryByText("paper107")).not.toBeInTheDocument();
@@ -143,11 +159,11 @@ describe("PapersPanel", () => {
     expect(screen.getByRole("columnheader", { name: /paper/i })).toHaveAttribute("aria-sort", "descending");
 
     await user.click(screen.getByRole("button", { name: "Reviews" }));
-    expect(getPaperOrder()).toEqual([107, 88, 42]);
+    expect(getPaperOrder()).toEqual([42, 88, 107]);
     expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "descending");
 
     await user.click(screen.getByRole("button", { name: "Reviews" }));
-    expect(getPaperOrder()).toEqual([42, 88, 107]);
+    expect(getPaperOrder()).toEqual([107, 88, 42]);
     expect(screen.getByRole("columnheader", { name: /reviews/i })).toHaveAttribute("aria-sort", "ascending");
 
     await user.click(screen.getByRole("button", { name: "Ready" }));
@@ -182,10 +198,10 @@ describe("PapersPanel", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Reviews" }));
-    expect(getPaperOrder()).toEqual([107, 88, 42, 121]);
+    expect(getPaperOrder()).toEqual([121, 42, 88, 107]);
 
     await user.click(screen.getByRole("button", { name: "Reviews" }));
-    expect(getPaperOrder()).toEqual([121, 42, 88, 107]);
+    expect(getPaperOrder()).toEqual([107, 88, 42, 121]);
   });
 
   it("renders compact icon status markers in the table", () => {
@@ -254,16 +270,17 @@ describe("PapersPanel", () => {
   it("shows scholar-style summary pills and updates them with the filtered view", async () => {
     renderPapersPanel();
     const user = userEvent.setup();
+    const summary = screen.getByLabelText("Papers summary");
 
-    expect(screen.getByText("Ready for rebuttal")).toBeInTheDocument();
-    expect(screen.getByText("1/3")).toBeInTheDocument();
-    expect(screen.getByText("Missing reviews")).toBeInTheDocument();
-    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(within(summary).getByText("Ready for rebuttal")).toBeInTheDocument();
+    expect(within(summary).getByText("1/3")).toBeInTheDocument();
+    expect(within(summary).getByText("Missing reviews")).toBeInTheDocument();
+    expect(within(summary).getByText("3")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/search papers/i), "42");
 
-    expect(screen.getByText("1/1")).toBeInTheDocument();
-    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(within(summary).getByText("1/1")).toBeInTheDocument();
+    expect(within(summary).getByText("0")).toBeInTheDocument();
   });
 
   it("moves the commitment export action into the paper header", async () => {

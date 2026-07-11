@@ -1,14 +1,20 @@
 "use client";
 
-import { joinClasses } from "@/lib/format";
-import type { TabKey, VenueStage, ViewerInfo } from "@/lib/types";
+import { AccountMenu } from "@/components/account-menu";
 import { VersionUpdateNotice } from "@/components/version-update-notice";
+import { formatLastSync, joinClasses } from "@/lib/format";
+import type { TabKey, VenueStage, ViewerInfo } from "@/lib/types";
 
 type ToolbarProps = {
   viewer: ViewerInfo | null;
+  venueId: string;
+  recentVenueIds: string[];
+  lastSyncedAt?: string;
   isBusy: boolean;
-  onLogin: () => void;
+  isLoadingDashboard: boolean;
+  isLoggingOut: boolean;
   onLogout: () => void;
+  onLoadOrRefresh: (venueId: string) => void;
   tabs: Array<{ key: TabKey; label: string }>;
   activeTab: TabKey;
   onTabChange: (tab: TabKey) => void;
@@ -18,15 +24,22 @@ type ToolbarProps = {
 
 export function Toolbar({
   viewer,
+  venueId,
+  recentVenueIds,
+  lastSyncedAt,
   isBusy,
-  onLogin,
+  isLoadingDashboard,
+  isLoggingOut,
   onLogout,
+  onLoadOrRefresh,
   tabs,
   activeTab,
   onTabChange,
   showTabs,
   venueStage
 }: ToolbarProps) {
+  const contextStatus = lastSyncedAt ? `Last sync: ${formatLastSync(lastSyncedAt)}` : null;
+
   return (
     <div className="toolbar-shell">
       <div className="toolbar-meta">
@@ -59,9 +72,16 @@ export function Toolbar({
             <p className="eyebrow">ACL Rolling Review</p>
             <div className="brand-title-row">
               <h1>SAC Monitor</h1>
-              <span className={joinClasses("status-chip", venueStage === "ARR Stage" ? "arr-stage" : "commitment-stage")}>
-                {venueStage}
-              </span>
+              <div className="brand-venue-context">
+                <span className={joinClasses("status-chip", venueStage === "ARR Stage" ? "arr-stage" : "commitment-stage")}>
+                  {venueStage}
+                </span>
+                {contextStatus ? (
+                  <span className="toolbar-sync-info">
+                    {contextStatus}
+                  </span>
+                ) : null}
+              </div>
               <VersionUpdateNotice />
             </div>
           </div>
@@ -87,16 +107,17 @@ export function Toolbar({
           </nav>
         ) : null}
         {viewer ? (
-          <div className="toolbar-auth-shell">
-            <button className="toolbar-auth-button" disabled={isBusy} onClick={onLogout} type="button">
-              Logout
-            </button>
-          </div>
-        ) : (
-          <button className="primary-button" disabled={isBusy} onClick={onLogin} type="button">
-            Login
-          </button>
-        )}
+          <AccountMenu
+            isBusy={isBusy}
+            isLoadingDashboard={isLoadingDashboard}
+            isLoggingOut={isLoggingOut}
+            onLoadOrRefresh={onLoadOrRefresh}
+            onLogout={onLogout}
+            recentVenueIds={recentVenueIds}
+            venueId={venueId}
+            viewer={viewer}
+          />
+        ) : null}
       </div>
     </div>
   );
