@@ -8,7 +8,7 @@ import { ACDashboardPanel } from "@/components/ac-dashboard-panel";
 import { CommentsPanel } from "@/components/comments-panel";
 import { EmptyStateIcon } from "@/components/empty-state-icon";
 import { LoginPanel } from "@/components/login-panel";
-import { LoadProgressPanel } from "@/components/load-progress-panel";
+import { formatLoadPhase, LoadProgressPanel } from "@/components/load-progress-panel";
 import { PapersPanel } from "@/components/papers-panel";
 import { Toolbar } from "@/components/toolbar";
 import type { DashboardLoadProgress, DashboardResponse, TabKey, VenueStage, ViewerInfo } from "@/lib/types";
@@ -280,6 +280,19 @@ function getVenueStage(venueId: string): VenueStage {
   return venueId.trim().startsWith(ARR_STAGE_PREFIX) ? "ARR Stage" : "Commitment Stage";
 }
 
+function isViewerInfo(value: unknown): value is ViewerInfo {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === "string" &&
+    candidate.id.trim().length > 0 &&
+    typeof candidate.fullname === "string"
+  );
+}
+
 function parseRecentVenueIds(rawValue: string | null): string[] {
   if (!rawValue) {
     return [];
@@ -366,9 +379,13 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
         setVenueId(savedVenue);
       }
 
-      if (savedViewer) {
-        const parsedViewer = JSON.parse(savedViewer) as ViewerInfo;
-        setViewer(parsedViewer);
+      if (savedViewer !== null) {
+        const parsedViewer: unknown = JSON.parse(savedViewer);
+        if (isViewerInfo(parsedViewer)) {
+          setViewer(parsedViewer);
+        } else {
+          window.sessionStorage.removeItem(VIEWER_STORAGE_KEY);
+        }
       }
     } catch {
       try {
@@ -503,16 +520,15 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
       return;
     }
     stopProgressPolling(true);
-    startTransition(() => {
-      setDashboard(payload);
-      setViewer(payload.viewer);
-      setVenueId(trimmedVenueId);
-      setActiveTab((current) =>
-        payload.venue.stage === "Commitment Stage" && (current === "ac" || current === "alerts")
-          ? "papers"
-          : current
-      );
-    });
+    // Commit the workspace and terminal progress together so success never describes stale UI.
+    setDashboard(payload);
+    setViewer(payload.viewer);
+    setVenueId(trimmedVenueId);
+    setActiveTab((current) =>
+      payload.venue.stage === "Commitment Stage" && (current === "ac" || current === "alerts")
+        ? "papers"
+        : current
+    );
     setLoadProgress({
       venueId: trimmedVenueId,
       phase: "ready",
@@ -920,12 +936,35 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
     setDashboardError(null);
   }
 
+  function handleLoadOrRefresh(nextVenueId: string) {
+    void requestDashboard(
+      nextVenueId,
+      Boolean(
+        dashboard?.venue.venueId &&
+          dashboard.venue.venueId.trim() === nextVenueId.trim()
+      )
+    );
+  }
+
   const loadedDashboard =
     dashboard?.venue.venueId.trim() === venueId.trim() ? dashboard : null;
   const isBusy = isAuthenticating || isLoadingDashboard || isLoggingOut;
   const visibleTabs = loadedDashboard?.venue.stage === "Commitment Stage" ? COMMITMENT_TABS : TABS;
   const selectedTab = visibleTabs.some((tab) => tab.key === activeTab) ? activeTab : "papers";
   const venueStage = loadedDashboard?.venue.stage ?? getVenueStage(venueId);
+  const showWorkspaceLoadPrompt = Boolean(
+    hasRestoredSession && viewer && !loadedDashboard && !isLoadingDashboard
+  );
+  let loadStatusAnnouncement = "";
+  if (viewer && loadProgress && !loadProgress.error) {
+    if (loadProgress.done) {
+      if (!isLoadingDashboard) {
+        loadStatusAnnouncement = `Venue loading complete. ${loadProgress.message}`;
+      }
+    } else {
+      loadStatusAnnouncement = `Venue loading phase: ${formatLoadPhase(loadProgress.phase)}.`;
+    }
+  }
 
   return (
     <div className="shell">
@@ -937,15 +976,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
             isLoadingDashboard={isLoadingDashboard}
             isLoggingOut={isLoggingOut}
             lastSyncedAt={loadedDashboard?.venue.lastSyncedAt}
-            onLoadOrRefresh={(nextVenueId) =>
-              void requestDashboard(
-                nextVenueId,
-                Boolean(
-                  dashboard?.venue.venueId &&
-                    dashboard.venue.venueId.trim() === nextVenueId.trim()
-                )
-              )
-            }
+            onLoadOrRefresh={handleLoadOrRefresh}
             onLogout={() => void handleLogout()}
             onTabChange={setActiveTab}
             recentVenueIds={recentVenueIds}
@@ -958,6 +989,10 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
         </header>
 
         <main className="workspace">
+          <p aria-atomic="true" className="sr-only" role="status">
+            {loadStatusAnnouncement}
+          </p>
+
           {hasRestoredSession && !viewer ? (
             <LoginPanel
               error={authError}
@@ -976,6 +1011,33 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
           ) : null}
 
           {dashboardError ? <div className="error-banner">{dashboardError}</div> : null}
+
+          {showWorkspaceLoadPrompt ? (
+            <section
+              aria-describedby="workspace-load-description"
+              aria-labelledby="workspace-load-title"
+              className="empty-state workspace-load-prompt"
+            >
+              <EmptyStateIcon />
+              <p className="eyebrow">Venue workspace</p>
+              <h2 id="workspace-load-title">Reopen your workspace</h2>
+              <p id="workspace-load-description">
+                Load the saved venue to bring your dashboard back into this browser tab.
+              </p>
+              <p className="workspace-load-venue">
+                <span>Venue ID</span>
+                <strong>{venueId}</strong>
+              </p>
+              <button
+                className="primary-button workspace-load-action"
+                disabled={isBusy || !venueId.trim()}
+                onClick={() => handleLoadOrRefresh(venueId)}
+                type="button"
+              >
+                Load / Refresh
+              </button>
+            </section>
+          ) : null}
 
           {viewer && loadedDashboard ? (
             <>

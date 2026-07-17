@@ -1,6 +1,6 @@
 {
   "name": "arr-sac-dashboard",
-  "version": "2.8.0",
+  "version": "2.8.2",
   "private": true,
   "scripts": {
     "predev": "node scripts/ensure-api-env.mjs",

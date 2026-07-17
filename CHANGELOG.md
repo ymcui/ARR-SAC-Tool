@@ -2,6 +2,26 @@
 
 All notable user-facing changes are documented here.
 
+## [2.8.2] - 2026-07-17
+
+### Added
+
+- Added a direct saved-venue recovery panel when a signed-in browser refresh has not yet loaded workspace data.
+- Added exact per-type counts to the Comments and Alerts filters, with alert declarations kept distinct from contextual thread entries.
+
+### Fixed
+
+- Positioned the recovery panel consistently with the login panel and preserved account-name descenders at high browser zoom.
+
+## [2.8.1] - 2026-07-13
+
+### Fixed
+
+- Aligned API alert totals with the interface by counting Emergency and Delay declarations without counting contextual Official Comment replies.
+- Rejected malformed restored viewer sessions before they reach account controls while preserving the profile-ID fallback for valid viewers without a display name.
+- Added semantic determinate and indeterminate loading progress, reliable phase/completion/error announcements, and correct zero-width failed bars.
+- Committed loaded workspace data and its completion announcement together so assistive technology cannot report success against stale content.
+
 ## [2.8.0] - 2026-07-11
 
 ### Added

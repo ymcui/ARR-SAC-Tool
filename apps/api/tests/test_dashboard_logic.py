@@ -26,7 +26,7 @@ def test_build_dashboard_response_matches_notebook_rules() -> None:
     assert response.summary.readyPapers == 1
     assert response.summary.metaReviewsDone == 2
     assert response.summary.commentsCount == 5
-    assert response.summary.alertsCount == 2
+    assert response.summary.alertsCount == 1
     assert len(response.withdrawnPapers) == 1
     assert response.withdrawnPapers[0].paperNumber == 44
     assert response.withdrawnPapers[0].paperTitle == "Withdrawn Work on Robust Review Signals"
@@ -78,6 +78,15 @@ def test_build_dashboard_response_matches_notebook_rules() -> None:
     assert response.areaChairs[0].areaChairEmail == "chair1@example.com"
     assert response.areaChairs[0].allReviewsReady is True
     assert response.areaChairs[1].allMetaReviewsReady is True
+
+
+def test_alert_summary_counts_declarations_not_contextual_replies() -> None:
+    response = build_dashboard_response(load_fixture(), "aclweb.org/ACL/ARR/2026/March")
+
+    alert = response.alerts[0].items[0]
+    assert alert.type == "Delay Notification"
+    assert [child.type for child in alert.children] == ["Official Comment"]
+    assert response.summary.alertsCount == 1
 
 
 def test_missing_reviewer_group_defaults_to_zero_expected_reviews() -> None:

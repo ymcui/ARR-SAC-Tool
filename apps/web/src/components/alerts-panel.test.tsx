@@ -161,7 +161,25 @@ describe("AlertsPanel", () => {
   it("renders an empty state when there are no alerts", () => {
     renderAlertsPanel([]);
     expect(screen.getByLabelText("0 alerts")).toHaveTextContent("0");
+    expect(
+      within(screen.getByLabelText("Type")).getByRole("option", {
+        name: "All thread entries (0)"
+      })
+    ).toBeInTheDocument();
     expect(screen.getByText(/no review alerts need attention/i)).toBeInTheDocument();
+  });
+
+  it("distinguishes alert declarations from contextual thread-entry counts", () => {
+    renderAlertsPanel();
+
+    const typeFilter = screen.getByLabelText("Type");
+    expect(screen.getByLabelText("3 alerts")).toHaveTextContent("3");
+    expect(
+      within(typeFilter).getByRole("option", { name: "All thread entries (4)" })
+    ).toHaveValue("all");
+    expect(within(typeFilter).getByRole("option", { name: "Delay Notification (2)" })).toHaveValue("Delay Notification");
+    expect(within(typeFilter).getByRole("option", { name: "Emergency Declaration (1)" })).toHaveValue("Emergency Declaration");
+    expect(within(typeFilter).getByRole("option", { name: "Official Comment (1)" })).toHaveValue("Official Comment");
   });
 
   it("does not load images embedded in OpenReview-authored Markdown", async () => {

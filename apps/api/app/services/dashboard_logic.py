@@ -121,7 +121,7 @@ def build_dashboard_response(
     area_chair_records = _build_area_chair_records(papers, area_chair_contacts)
     analytics = _build_analytics(papers)
     comment_count = sum(_count_comments(group.items) for group in comment_groups)
-    alert_count = sum(_count_alerts(group.items) for group in alert_groups)
+    alert_count = sum(_count_alert_declarations(group.items) for group in alert_groups)
     logger.warning(
         (
             "Dashboard build phase assemble_views completed in %.2fs for %s: "
@@ -192,10 +192,11 @@ def _count_comments(items: List[CommentRecord]) -> int:
     return total
 
 
-def _count_alerts(items: List[AlertRecord]) -> int:
+def _count_alert_declarations(items: List[AlertRecord]) -> int:
     total = 0
     for item in items:
-        total += 1 + _count_alerts(item.children)
+        total += int(item.type in ALERT_TYPE_PRIORITY)
+        total += _count_alert_declarations(item.children)
     return total
 
 

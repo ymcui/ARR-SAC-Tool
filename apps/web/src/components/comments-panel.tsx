@@ -125,9 +125,14 @@ export function CommentsPanel({ comments, papers = [], totalComments }: Comments
 
   const paperById = useMemo(() => new Map(papers.map((paper) => [paper.paperId, paper])), [papers]);
 
-  const types = useMemo(
-    () => [...new Set(comments.flatMap((group) => group.items.flatMap(flattenTypes)))].sort(),
+  const commentTypeCounts = useMemo(
+    () => new Map(countCommentTypes(comments.flatMap((group) => group.items))),
     [comments]
+  );
+  const types = useMemo(() => [...commentTypeCounts.keys()], [commentTypeCounts]);
+  const availableCommentCount = useMemo(
+    () => [...commentTypeCounts.values()].reduce((total, count) => total + count, 0),
+    [commentTypeCounts]
   );
 
   useEffect(() => {
@@ -202,10 +207,10 @@ export function CommentsPanel({ comments, papers = [], totalComments }: Comments
           <label className="field compact comments-type-field">
             <span className="sr-only">Type</span>
             <select onChange={(event) => setTypeFilter(event.target.value)} value={typeFilter}>
-              <option value="all">All types</option>
+              <option value="all">All types ({availableCommentCount})</option>
               {types.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {type} ({commentTypeCounts.get(type) ?? 0})
                 </option>
               ))}
             </select>
@@ -292,8 +297,4 @@ export function CommentsPanel({ comments, papers = [], totalComments }: Comments
       </div>
     </section>
   );
-}
-
-function flattenTypes(comment: CommentRecord): string[] {
-  return [comment.type, ...comment.children.flatMap(flattenTypes)];
 }

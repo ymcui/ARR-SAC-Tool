@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { CommentsPanel } from "@/components/comments-panel";
@@ -96,7 +96,18 @@ describe("CommentsPanel", () => {
   it("renders an empty state when there are no comments", () => {
     render(createElement(CommentsPanel, { comments: [] }));
     expect(screen.getByLabelText("0 comments")).toHaveTextContent("0");
+    expect(within(screen.getByLabelText("Type")).getByRole("option", { name: "All types (0)" })).toBeInTheDocument();
     expect(screen.getByText(/no comments need attention/i)).toBeInTheDocument();
+  });
+
+  it("shows exact post counts beside every comment type filter", () => {
+    render(createElement(CommentsPanel, { comments: commentsFixture }));
+
+    const typeFilter = screen.getByLabelText("Type");
+    expect(within(typeFilter).getByRole("option", { name: "All types (3)" })).toHaveValue("all");
+    expect(within(typeFilter).getByRole("option", { name: "Author Response (1)" })).toHaveValue("Author Response");
+    expect(within(typeFilter).getByRole("option", { name: "Confidential Comment (1)" })).toHaveValue("Confidential Comment");
+    expect(within(typeFilter).getByRole("option", { name: "Official Comment (1)" })).toHaveValue("Official Comment");
   });
 
   it("collapses paper comment groups by default and shows post counts", async () => {
@@ -168,6 +179,9 @@ describe("CommentsPanel", () => {
     );
 
     expect(screen.getByText("Program Chairs: 1")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Type")).getByRole("option", { name: "Program Chairs (1)" })
+    ).toHaveValue("Program Chairs");
     await user.selectOptions(screen.getByLabelText("Type"), "Program Chairs");
     await user.click(screen.getByRole("button", { name: /paper 10145 gptzero result scope 1 post/i }));
 

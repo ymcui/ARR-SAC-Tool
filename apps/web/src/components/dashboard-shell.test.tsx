@@ -1,6 +1,6 @@
-import { createElement } from "react";
+import { createElement, Profiler } from "react";
 import { renderToString } from "react-dom/server";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DashboardShell } from "@/components/dashboard-shell";
@@ -181,6 +181,98 @@ describe("DashboardShell", () => {
     expect(markup).not.toContain("Sign in &amp; load venue");
   });
 
+  it.each([
+    ["a missing fullname", { id: "~Malformed_Viewer1" }],
+    ["a non-string id", { id: 42, fullname: "Malformed Viewer" }],
+    ["an empty id", { id: "", fullname: "Malformed Viewer" }],
+    ["a null viewer", null]
+  ])("discards restored viewer data with %s", async (_description, malformedViewer) => {
+    window.sessionStorage.setItem(
+      "arr-sac-dashboard.viewer",
+      JSON.stringify(malformedViewer)
+    );
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(createElement(DashboardShell));
+
+    expect(await screen.findByRole("region", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Malformed Viewer" })).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem("arr-sac-dashboard.viewer")).toBeNull();
+  });
+
+  it("discards an empty restored viewer value", async () => {
+    window.sessionStorage.setItem("arr-sac-dashboard.viewer", "");
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(createElement(DashboardShell));
+
+    expect(await screen.findByRole("region", { name: "Sign in" })).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("arr-sac-dashboard.viewer")).toBeNull();
+  });
+
+  it("accepts a restored viewer with an empty fullname and falls back to its profile id", async () => {
+    const viewerWithoutFullname = { id: "~Viewer_Without_Name1", fullname: "" };
+    window.sessionStorage.setItem(
+      "arr-sac-dashboard.viewer",
+      JSON.stringify(viewerWithoutFullname)
+    );
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(createElement(DashboardShell));
+
+    expect(
+      await screen.findByRole("button", { name: viewerWithoutFullname.id })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Sign in" })).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem("arr-sac-dashboard.viewer")).toBe(
+      JSON.stringify(viewerWithoutFullname)
+    );
+  });
+
+  it.each([
+    ["the saved venue", dashboardFixture.venue.venueId],
+    ["the default venue when none was saved", null]
+  ])("offers a direct way to reopen %s after a browser refresh", async (_description, savedVenue) => {
+    restoreViewer();
+    if (savedVenue) {
+      window.sessionStorage.setItem("arr-sac-dashboard.venue", savedVenue);
+    }
+    const expectedVenue = savedVenue ?? "aclweb.org/ACL/ARR/2026/May";
+    const expectedDashboard: DashboardResponse = {
+      ...dashboardFixture,
+      venue: {
+        ...dashboardFixture.venue,
+        venueId: expectedVenue
+      }
+    };
+    const fetchMock = createFetchMock(createResponse(expectedDashboard));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(createElement(DashboardShell));
+
+    const prompt = await screen.findByRole("region", { name: "Reopen your workspace" });
+    expect(within(prompt).getByText(expectedVenue)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Sign in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Papers" })).not.toBeInTheDocument();
+    expect(appFetchCalls(fetchMock)).toHaveLength(0);
+
+    const user = userEvent.setup();
+    await user.click(within(prompt).getByRole("button", { name: "Load / Refresh" }));
+
+    expect(await screen.findByText("Paper workspace")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "42" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Reopen your workspace" })).not.toBeInTheDocument();
+
+    const dashboardCalls = appFetchCalls(fetchMock);
+    expect(dashboardCalls).toHaveLength(1);
+    const dashboardUrl = new URL(String(dashboardCalls[0][0]), window.location.origin);
+    expect(dashboardUrl.pathname).toBe("/api/dashboard");
+    expect(dashboardUrl.searchParams.get("venueId")).toBe(expectedVenue);
+    expect(dashboardUrl.searchParams.get("refresh")).toBe("0");
+    expect(dashboardUrl.searchParams.get("loadId")).toBeTruthy();
+    expect(window.sessionStorage.getItem("arr-sac-dashboard.venue")).toBe(expectedVenue);
+  });
+
   it("signs in and loads the selected venue in one action", async () => {
     const fetchMock = createFetchMock(
       createResponse(dashboardFixture.viewer),
@@ -202,6 +294,8 @@ describe("DashboardShell", () => {
     expect(screen.getByLabelText("Venue ID")).toHaveValue("aclweb.org/ACL/ARR/2026/May");
     expect(screen.getByText("ARR Stage")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const loadStatus = screen.getByRole("status");
+    expect(loadStatus).toBeEmptyDOMElement();
 
     await signInAndLoad(user);
 
@@ -223,6 +317,10 @@ describe("DashboardShell", () => {
     expect(screen.queryByText("Load a venue.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/batch summary/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Loaded 1 papers for this SAC batch.")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBe(loadStatus);
+    expect(loadStatus).toHaveTextContent(
+      "Venue loading complete. Loaded 1 papers for this SAC batch."
+    );
 
     await waitFor(() => {
       expect(appFetchCalls(fetchMock)).toHaveLength(2);
@@ -245,6 +343,94 @@ describe("DashboardShell", () => {
       expect(appFetchCalls(fetchMock)).toHaveLength(3);
     });
     expect(String(appFetchCalls(fetchMock)[2][0])).toContain("refresh=1");
+  });
+
+  it("does not announce completion before the loaded workspace commits", async () => {
+    restoreViewer();
+    window.sessionStorage.setItem("arr-sac-dashboard.venue", dashboardFixture.venue.venueId);
+    let currentLoadId: string | null = null;
+    let resolveDashboard!: (response: Response) => void;
+    const dashboardResponse = new Promise<Response>((resolve) => {
+      resolveDashboard = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url === GITHUB_PACKAGE_URL) {
+        return createResponse({ version: "2.1.2" });
+      }
+      if (apiRequestPath(url).startsWith("/api/dashboard/progress")) {
+        return createResponse({
+          venueId: dashboardFixture.venue.venueId,
+          loadId: currentLoadId,
+          phase: "papers",
+          message: "Scanning papers...",
+          current: 0,
+          total: 1,
+          done: false,
+          error: null
+        });
+      }
+      if (apiRequestPath(url).startsWith("/api/dashboard?")) {
+        currentLoadId = new URL(url, "http://localhost").searchParams.get("loadId");
+        return dashboardResponse;
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const commits: Array<{ announcement: string; hasWorkspace: boolean }> = [];
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = render(
+      createElement(
+        Profiler,
+        {
+          id: "dashboard-shell",
+          onRender: () => {
+            commits.push({
+              announcement:
+                host.querySelector<HTMLElement>('[role="status"]')?.textContent?.trim() ?? "",
+              hasWorkspace: host.textContent?.includes("Paper workspace") ?? false
+            });
+          }
+        },
+        createElement(DashboardShell)
+      ),
+      { container: host }
+    );
+
+    try {
+      const user = userEvent.setup();
+      await openAccountMenu(user);
+      const accountDialog = screen.getByRole("dialog", { name: /account and venue settings/i });
+      await user.click(within(accountDialog).getByRole("button", { name: /load \/ refresh/i }));
+      expect(
+        await screen.findByRole("progressbar", { name: "Venue load progress" })
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Reopen your workspace" })).not.toBeInTheDocument();
+      commits.length = 0;
+
+      await act(async () => {
+        resolveDashboard(createResponse(dashboardFixture));
+      });
+      expect(await screen.findByText("Paper workspace")).toBeInTheDocument();
+
+      expect(
+        commits.some(
+          ({ announcement, hasWorkspace }) =>
+            announcement.includes("Venue loading complete") && !hasWorkspace
+        )
+      ).toBe(false);
+      expect(
+        commits.some(
+          ({ announcement, hasWorkspace }) =>
+            announcement.includes("Venue loading complete") && hasWorkspace
+        )
+      ).toBe(true);
+    } finally {
+      view.unmount();
+      host.remove();
+    }
   });
 
   it("passes API summary totals through to paper and comment title pills", async () => {
@@ -754,10 +940,14 @@ describe("DashboardShell", () => {
         await Promise.resolve();
       });
 
-      const progressStatus = screen.getByRole("status", { name: "Venue loading progress" });
-      expect(progressStatus).toHaveTextContent("Venue");
-      expect(progressStatus).toHaveTextContent("Working");
-      expect(progressStatus).toHaveTextContent("Starting venue load...");
+      const progressRegion = screen.getByRole("region", { name: "Venue loading progress" });
+      expect(progressRegion).toHaveTextContent("Venue");
+      expect(progressRegion).toHaveTextContent("Working");
+      expect(progressRegion).toHaveTextContent("Starting venue load...");
+      expect(screen.getByRole("status")).toHaveTextContent("Venue loading phase: Venue.");
+      expect(screen.getByRole("progressbar", { name: "Venue load progress" })).not.toHaveAttribute(
+        "aria-valuenow"
+      );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1000);
         await vi.advanceTimersByTimeAsync(4000);
@@ -949,6 +1139,7 @@ describe("DashboardShell", () => {
     expect(screen.queryByRole("tab", { name: "Papers" })).not.toBeInTheDocument();
     expect(screen.getByText("Commitment Stage")).toBeInTheDocument();
     expect(await screen.findAllByText("Unknown venue.")).not.toHaveLength(0);
+    expect(screen.getByRole("region", { name: "Reopen your workspace" })).toBeInTheDocument();
     expect(window.sessionStorage.getItem("arr-sac-dashboard.venue")).toBe(
       "aclweb.org/ACL/2026/Conference"
     );
@@ -982,7 +1173,8 @@ describe("DashboardShell", () => {
     const retainedVenueInput = await openAccountMenu(user);
     await user.clear(retainedVenueInput);
     await user.type(retainedVenueInput, dashboardFixture.venue.venueId);
-    await user.click(screen.getByRole("button", { name: /load \/ refresh/i }));
+    const accountDialog = screen.getByRole("dialog", { name: /account and venue settings/i });
+    await user.click(within(accountDialog).getByRole("button", { name: /load \/ refresh/i }));
 
     expect(await screen.findAllByText("Refresh failed.")).not.toHaveLength(0);
     expect(screen.getByText("ARR Stage")).toBeInTheDocument();

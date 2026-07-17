@@ -134,8 +134,13 @@ function profileIdDisplayName(profileId: string) {
   return normalized || profileId;
 }
 
-function flattenTypes(alert: AlertRecord): string[] {
-  return [alert.type, ...alert.children.flatMap(flattenTypes)];
+function countAlertTypes(nodes: AlertRecord[], counts = new Map<string, number>()) {
+  nodes.forEach((node) => {
+    counts.set(node.type, (counts.get(node.type) ?? 0) + 1);
+    countAlertTypes(node.children, counts);
+  });
+
+  return counts;
 }
 
 function countAlertType(nodes: AlertRecord[], type: string): number {
@@ -232,9 +237,23 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
     () => new Map(areaChairs.map((areaChair) => [areaChair.areaChair, areaChair])),
     [areaChairs]
   );
-  const types = useMemo(
-    () => [...new Set(alerts.flatMap((group) => group.items.flatMap(flattenTypes)))].sort(),
+  const alertTypeCounts = useMemo(
+    () => {
+      const counts = new Map<string, number>();
+      alerts.forEach((group) => countAlertTypes(group.items, counts));
+      return counts;
+    },
     [alerts]
+  );
+  const types = useMemo(
+    () => [...alertTypeCounts.keys()].sort((leftType, rightType) =>
+      leftType.localeCompare(rightType, undefined, { sensitivity: "base" })
+    ),
+    [alertTypeCounts]
+  );
+  const availableAlertCount = useMemo(
+    () => [...alertTypeCounts.values()].reduce((total, count) => total + count, 0),
+    [alertTypeCounts]
   );
   useEffect(() => {
     if (typeFilter !== "all" && !types.includes(typeFilter)) {
@@ -408,10 +427,10 @@ export function AlertsPanel({ alerts, areaChairs, papers }: AlertsPanelProps) {
           <label className="field compact comments-type-field">
             <span className="sr-only">Type</span>
             <select onChange={(event) => setTypeFilter(event.target.value)} value={typeFilter}>
-              <option value="all">All types</option>
+              <option value="all">All thread entries ({availableAlertCount})</option>
               {types.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {type} ({alertTypeCounts.get(type) ?? 0})
                 </option>
               ))}
             </select>
