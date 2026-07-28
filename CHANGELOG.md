@@ -2,6 +2,16 @@
 
 All notable user-facing changes are documented here.
 
+## [2.9.0] - 2026-07-28
+
+### Added
+
+- Added full meta-review text and its score to expanded paper details, with a scrollable reading panel and a clear empty state.
+
+### Changed
+
+- Rebalanced expanded paper details around reviewer scores and meta-review content, and moved the OpenReview link into a compact title-row action.
+
 ## [2.8.2] - 2026-07-17
 
 ### Added

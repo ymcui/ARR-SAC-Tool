@@ -27,7 +27,8 @@ const papersFixture: PaperRecord[] = [
     excitementScore: { average: 3.5, values: [3, 4, 3.5] },
     overallAssessment: { average: 4, values: [4, 4, 4] },
     metaReviewScore: 4,
-    metaReviewText: "",
+    metaReviewText:
+      "Metareview:\nStrong paper with a clear contribution.\n\nSummary Of Suggested Revisions:\nClarify the ablation setup.",
     responseToMetaReview: "",
     forumUrl: "https://openreview.net/forum?id=paper42"
   },
@@ -123,7 +124,7 @@ describe("PapersPanel", () => {
     expect(screen.queryByLabelText(`${papersFixture.length} papers`)).not.toBeInTheDocument();
   });
 
-  it("uses a simplified control bar and reveals the paper id only in the expanded row", async () => {
+  it("uses a simplified control bar and reveals the OpenReview action only in the expanded row", async () => {
     renderPapersPanel();
     const user = userEvent.setup();
 
@@ -132,7 +133,7 @@ describe("PapersPanel", () => {
     );
     expect(screen.queryAllByRole("combobox")).toHaveLength(0);
     expect(screen.getByPlaceholderText("Search paper #, AC, or type")).toBeInTheDocument();
-    expect(screen.queryByText("paper107")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open in OpenReview" })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/search papers/i), "paper107");
 
@@ -143,8 +144,37 @@ describe("PapersPanel", () => {
 
     expect(screen.getByText("Compact Methods for Review Calibration")).toBeInTheDocument();
     expect(await screen.findByText("Reviewer score breakdown")).toBeInTheDocument();
-    expect(screen.getByText("paper107")).toBeInTheDocument();
-    expect(screen.getByText("Open paper thread")).toBeInTheDocument();
+    expect(screen.queryByText("Paper status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Review readiness")).not.toBeInTheDocument();
+    expect(screen.queryByText("paper107")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open in OpenReview" })).toHaveAttribute(
+      "href",
+      "https://openreview.net/forum?id=paper107"
+    );
+    const openReviewLink = screen.getByRole("link", { name: "Open in OpenReview" });
+    expect(openReviewLink).toHaveAttribute("target", "_blank");
+    expect(openReviewLink.querySelector("svg")).toHaveClass("paper-detail-openreview-icon");
+    expect(screen.getByRole("textbox", { name: "Meta-review for paper 107" })).toHaveTextContent(
+      "No meta-review has been submitted yet."
+    );
+    expect(screen.getByLabelText("Meta-review score N/A")).toBeInTheDocument();
+  });
+
+  it("shows the submitted meta-review text and score in the expanded paper detail", async () => {
+    renderPapersPanel();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "42" }));
+
+    const metaReview = screen.getByRole("textbox", { name: "Meta-review for paper 42" });
+    expect(metaReview).toHaveAttribute("aria-readonly", "true");
+    expect(metaReview).toHaveTextContent("Metareview: Strong paper with a clear contribution.");
+    expect(metaReview).toHaveTextContent("Summary Of Suggested Revisions: Clarify the ablation setup.");
+    const metaReviewScore = screen.getByLabelText("Meta-review score 4.0");
+    expect(metaReviewScore).toHaveTextContent("Score 4.0");
+    expect(screen.getByRole("heading", { name: "Meta-review" }).parentElement).toContainElement(
+      metaReviewScore
+    );
   });
 
   it("sorts through clickable headers and keeps missing meta/overall values at the end", async () => {
@@ -264,7 +294,10 @@ describe("PapersPanel", () => {
     await user.click(screen.getByText("~Area_ChairA"));
 
     expect(await screen.findByText("Reviewer score breakdown")).toBeInTheDocument();
-    expect(screen.getByText("paper88")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open in OpenReview" })).toHaveAttribute(
+      "href",
+      "https://openreview.net/forum?id=paper88"
+    );
   });
 
   it("shows scholar-style summary pills and updates them with the filtered view", async () => {

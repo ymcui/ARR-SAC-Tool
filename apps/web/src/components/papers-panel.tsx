@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
 
 import { TableBooleanIcon } from "@/components/table-boolean-icon";
@@ -482,6 +483,7 @@ export function PapersPanel({
             {filteredPapers.map((paper) => {
               const expanded = expandedPaperId === paper.paperId;
               const displayTitle = (paper.paperTitle || "").trim() || `Paper ${paper.paperNumber}`;
+              const metaReviewText = paper.metaReviewText.trim();
               return (
                 <Fragment key={paper.paperId}>
                   <tr
@@ -560,40 +562,56 @@ export function PapersPanel({
                           <div className="collapsible-inner">
                             <div className="detail-panel-content paper-detail-grid">
                               <div className="paper-detail-title">
-                                <span className="score-label">Paper title</span>
-                                <h3>{displayTitle}</h3>
+                                <div className="paper-detail-title-copy">
+                                  <span className="score-label">Paper title</span>
+                                  <h3>{displayTitle}</h3>
+                                </div>
+                                <a
+                                  className="secondary-button paper-detail-openreview"
+                                  href={paper.forumUrl}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  Open in OpenReview
+                                  <ArrowTopRightOnSquareIcon
+                                    aria-hidden="true"
+                                    className="paper-detail-openreview-icon"
+                                  />
+                                </a>
                               </div>
 
-                              <div className="detail-stack">
-                                <h3>Reviewer score breakdown</h3>
-                                {scoreBlock("Confidence", paper, "reviewerConfidence")}
-                                {scoreBlock("Soundness", paper, "soundnessScore")}
-                                {scoreBlock("Excitement", paper, "excitementScore")}
-                                {scoreBlock("Overall", paper, "overallAssessment")}
-                              </div>
+                              <div className="paper-detail-body">
+                                <div className="detail-stack paper-detail-scores">
+                                  <h3>Reviewer score breakdown</h3>
+                                  {scoreBlock("Confidence", paper, "reviewerConfidence")}
+                                  {scoreBlock("Soundness", paper, "soundnessScore")}
+                                  {scoreBlock("Excitement", paper, "excitementScore")}
+                                  {scoreBlock("Overall", paper, "overallAssessment")}
+                                </div>
 
-                              <div className="detail-stack">
-                                <h3>Paper status</h3>
-                                <div className="score-block">
-                                  <span className="score-label">Paper ID</span>
-                                  <strong className="monospace">{paper.paperId}</strong>
-                                </div>
-                                <div className="score-block">
-                                  <span className="score-label">Meta-review</span>
-                                  <strong>{formatScore(paper.metaReviewScore)}</strong>
-                                </div>
-                                <div className="score-block">
-                                  <span className="score-label">Review readiness</span>
-                                  <strong>
-                                    {paper.readyForRebuttal ? "Three or more reviews" : "Still below threshold"}
-                                  </strong>
-                                </div>
-                                <div className="score-block">
-                                  <span className="score-label">OpenReview forum</span>
-                                  <a href={paper.forumUrl} rel="noreferrer" target="_blank">
-                                    Open paper thread
-                                  </a>
-                                </div>
+                                <section className="paper-meta-review">
+                                  <div className="paper-meta-review-header">
+                                    <h3>Meta-review</h3>
+                                    <span
+                                      aria-label={`Meta-review score ${formatScore(paper.metaReviewScore)}`}
+                                      className="paper-meta-review-score"
+                                    >
+                                      Score {formatScore(paper.metaReviewScore)}
+                                    </span>
+                                  </div>
+                                  <div
+                                    aria-label={`Meta-review for paper ${paper.paperNumber}`}
+                                    aria-readonly="true"
+                                    className={joinClasses(
+                                      "paper-meta-review-copy",
+                                      !metaReviewText && "empty"
+                                    )}
+                                    role="textbox"
+                                    tabIndex={metaReviewText ? 0 : undefined}
+                                  >
+                                    {metaReviewText || "No meta-review has been submitted yet."}
+                                  </div>
+                                </section>
                               </div>
                             </div>
                           </div>
