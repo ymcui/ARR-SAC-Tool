@@ -3,12 +3,14 @@ from __future__ import annotations
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List
 from urllib.parse import parse_qs, urlparse
 
 import openreview
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from app.schemas import ViewerInfo
 from app.session_store import DEFAULT_SESSION_TTL_SECONDS
@@ -16,9 +18,7 @@ from app.session_store import DEFAULT_SESSION_TTL_SECONDS
 OPENREVIEW_BASE_URL = "https://api2.openreview.net"
 OPENREVIEW_FORUM_URL = "https://openreview.net/forum?id={paper_id}"
 ARR_STAGE_PREFIX = "aclweb.org/ACL/ARR"
-MAX_COMMITMENT_LOAD_WORKERS = 8
-MAX_ARR_DETAIL_LOAD_WORKERS = 8
-MAX_AREA_CHAIR_CONTACT_WORKERS = 8
+OPENREVIEW_NOTE_BATCH_SIZE = 50
 OPENREVIEW_CONNECT_TIMEOUT_SECONDS = 10
 OPENREVIEW_READ_TIMEOUT_SECONDS = 180
 logger = logging.getLogger(__name__)
@@ -45,6 +45,10 @@ class DashboardAuthenticationError(DashboardFetchError):
     pass
 
 
+class DashboardRateLimitError(DashboardFetchError):
+    pass
+
+
 def _exception_status(exc: BaseException) -> int | None:
     response = getattr(exc, "response", None)
     response_status = getattr(response, "status_code", None)
@@ -68,29 +72,74 @@ def _exception_status(exc: BaseException) -> int | None:
     return None
 
 
+def _exception_value(exc: BaseException, target_key: str) -> Any:
+    pending: List[Any] = list(getattr(exc, "args", ()))
+    response = getattr(exc, "response", None)
+    response_json = getattr(response, "json", None)
+    if callable(response_json):
+        try:
+            pending.append(response_json())
+        except (requests.RequestException, ValueError):
+            pass
+
+    while pending:
+        value = pending.pop(0)
+        if isinstance(value, dict):
+            if target_key in value:
+                return value[target_key]
+            pending.extend(value.values())
+        elif isinstance(value, (list, tuple)):
+            pending.extend(value)
+
+    return None
+
+
+def _rate_limit_message(exc: BaseException) -> str:
+    reset_time = _exception_value(exc, "resetTime")
+    if isinstance(reset_time, str):
+        try:
+            parsed_reset_time = datetime.fromisoformat(reset_time.replace("Z", "+00:00"))
+            reset_time_utc = parsed_reset_time.astimezone(timezone.utc)
+            return (
+                "OpenReview rate limit reached. Try Load / Refresh again after "
+                f"{reset_time_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
+            )
+        except ValueError:
+            pass
+
+    return "OpenReview rate limit reached. Wait for its request window to reset, then try Load / Refresh again."
+
+
 def _raise_if_authentication_error(exc: BaseException) -> None:
-    if isinstance(exc, DashboardAuthenticationError):
+    if isinstance(exc, (DashboardAuthenticationError, DashboardRateLimitError)):
         raise exc
-    if _exception_status(exc) == 401:
-        raise DashboardAuthenticationError("OpenReview session expired. Log in again.") from exc
-
-
-def _is_missing_group_error(exc: BaseException) -> bool:
-    if isinstance(exc, IndexError):
-        return True
-
     status = _exception_status(exc)
-    if status is not None:
-        return status == 404
-
-    message = str(exc).lower()
-    return "group not found" in message or "group was not found" in message
+    if status == 401:
+        raise DashboardAuthenticationError("OpenReview session expired. Log in again.") from exc
+    if status == 429:
+        raise DashboardRateLimitError(_rate_limit_message(exc)) from exc
 
 
 def _configure_client_timeouts(client: Any) -> None:
     session = getattr(client, "session", None)
     if session is None or getattr(session, "_arr_sac_timeout_configured", False):
         return
+
+    mount = getattr(session, "mount", None)
+    if callable(mount):
+        # openreview-py enables Retry-After retries for HTTP 429 responses. A venue
+        # request can otherwise remain asleep for almost an hour without returning
+        # useful state to the dashboard. Keep short upstream/server retries, but let
+        # the application surface rate limits immediately.
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=(500, 502, 503, 504),
+            respect_retry_after_header=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        mount("https://", adapter)
+        mount("http://", adapter)
 
     original_request = session.request
 
@@ -119,6 +168,20 @@ def _content_value(value: Any, default: str = "") -> str:
     if value is None:
         return default
     return str(value)
+
+
+def _content_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, dict):
+        value = value.get("value", default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no", ""}:
+            return False
+    return default
 
 
 def _content_text(value: Any) -> str:
@@ -160,6 +223,96 @@ def _note_to_dict(note: Any) -> Dict[str, Any]:
     }
 
 
+def _load_notes_in_batches(
+    client: Any,
+    *,
+    filter_name: str,
+    values: Iterable[str | int],
+    invitation: str | None = None,
+    details: str | None = None,
+) -> List[Any]:
+    session = getattr(client, "session", None)
+    notes_url = getattr(client, "notes_url", None)
+    headers = getattr(client, "headers", None)
+    if session is None or not isinstance(notes_url, str) or not isinstance(headers, dict):
+        raise DashboardFetchError("The OpenReview client does not support bounded batch note loading.")
+
+    unique_values: List[str | int] = []
+    seen_values: set[str] = set()
+    for value in values:
+        normalized_value: str | int = value if isinstance(value, int) else str(value).strip()
+        normalized_key = str(normalized_value)
+        if not normalized_key or normalized_key in seen_values:
+            continue
+        seen_values.add(normalized_key)
+        unique_values.append(normalized_value)
+    notes: List[Any] = []
+    for offset in range(0, len(unique_values), OPENREVIEW_NOTE_BATCH_SIZE):
+        batch = unique_values[offset : offset + OPENREVIEW_NOTE_BATCH_SIZE]
+        params: Dict[str, Any] = {
+            filter_name: batch,
+            "limit": len(batch),
+        }
+        if invitation:
+            params["invitation"] = invitation
+        if details:
+            params["details"] = details
+        response = session.get(
+            notes_url,
+            params=params,
+            headers=headers,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        raw_notes = payload.get("notes") if isinstance(payload, dict) else None
+        if not isinstance(raw_notes, list):
+            raise DashboardFetchError("OpenReview returned an invalid batch-note response.")
+
+        for raw_note in raw_notes:
+            if not isinstance(raw_note, dict):
+                raise DashboardFetchError("OpenReview returned an invalid batch-note entry.")
+            notes.append(openreview.api.Note.from_json(raw_note))
+
+    return notes
+
+
+def _load_notes_by_ids(
+    client: Any,
+    note_ids: Iterable[str],
+    *,
+    details: str | None = None,
+) -> Dict[str, Any]:
+    notes = _load_notes_in_batches(
+        client,
+        filter_name="ids",
+        values=note_ids,
+        details=details,
+    )
+    return {
+        str(note.id): note
+        for note in notes
+        if getattr(note, "id", None)
+    }
+
+
+def _load_notes_by_numbers_with_replies(
+    client: Any,
+    invitation: str,
+    note_numbers: Iterable[int],
+) -> List[Any]:
+    return _load_notes_in_batches(
+        client,
+        filter_name="number",
+        values=note_numbers,
+        invitation=invitation,
+        details="replies",
+    )
+
+
+def _load_notes_by_ids_with_replies(client: Any, note_ids: Iterable[str]) -> Dict[str, Any]:
+    return _load_notes_by_ids(client, note_ids, details="replies")
+
+
 def _group_members(group: Any) -> List[str]:
     return list(getattr(group, "members", []) or [])
 
@@ -196,37 +349,62 @@ def _resolve_bulk_group_members(group: Any, groups_by_id: Dict[str, Any]) -> tup
 
 
 def _resolve_group_members(
-    client: Any,
     group_ids: Iterable[str],
-    groups_by_id: Dict[str, Any] | None = None,
+    groups_by_id: Dict[str, Any],
     *,
     continue_on_empty: bool = False,
 ) -> List[str]:
-    groups_by_id = groups_by_id or {}
     for group_id in group_ids:
         group = groups_by_id.get(group_id)
-        if group is not None:
-            members, fully_resolved = _resolve_bulk_group_members(group, groups_by_id)
-            if fully_resolved:
-                if members or not continue_on_empty:
-                    return members
-                continue
-            logger.debug("Bulk group %s had unresolved anonymous members; falling back", group_id)
+        if group is None:
+            continue
 
-        try:
-            members = list(client.get_group(group_id).members)
-        except requests.RequestException as exc:
-            _raise_if_authentication_error(exc)
-            raise DashboardFetchError(f"Could not resolve assignment group '{group_id}'.") from exc
-        except Exception as exc:
-            _raise_if_authentication_error(exc)
-            if _is_missing_group_error(exc):
-                continue
-            raise DashboardFetchError(f"Could not resolve assignment group '{group_id}'.") from exc
+        members, fully_resolved = _resolve_bulk_group_members(group, groups_by_id)
+        if not fully_resolved:
+            raise DashboardFetchError(
+                f"OpenReview's bulk response could not resolve anonymous members for assignment group '{group_id}'."
+            )
         if members or not continue_on_empty:
             return members
 
     return []
+
+
+def _assignment_members_by_head_from_edges(edges: Iterable[Any]) -> Dict[str, List[str]]:
+    members_by_head: Dict[str, List[str]] = {}
+    for edge in edges:
+        head = str(getattr(edge, "head", "") or "").strip()
+        tail = str(getattr(edge, "tail", "") or "").strip()
+        if not head or not tail:
+            continue
+        members = members_by_head.setdefault(head, [])
+        if tail not in members:
+            members.append(tail)
+    return members_by_head
+
+
+def _assignment_members_by_head(client: Any, invitation_id: str) -> Dict[str, List[str]]:
+    return _assignment_members_by_head_from_edges(
+        client.get_all_edges(invitation=invitation_id)
+    )
+
+
+def _paper_assignment_group_ids(
+    venue_id: str,
+    submission_name: str,
+    role_name: str,
+    *paper_numbers: int,
+) -> List[str]:
+    group_ids: List[str] = []
+    for paper_number in dict.fromkeys(number for number in paper_numbers if number):
+        for group_id in (
+            f"{venue_id}/{submission_name}{paper_number}/{role_name}",
+            f"{venue_id}/Submission{paper_number}/{role_name}",
+            f"{venue_id}/Paper{paper_number}/{role_name}",
+        ):
+            if group_id not in group_ids:
+                group_ids.append(group_id)
+    return group_ids
 
 
 def _profile_content(profile: Any) -> Dict[str, Any]:
@@ -279,16 +457,6 @@ def _first_usable_email(values: Any) -> str:
             return str(value)
 
     return ""
-
-
-def _profile_group_email(client: Any, profile_id: str) -> str:
-    try:
-        group = client.get_group(profile_id)
-    except Exception as exc:
-        _raise_if_authentication_error(exc)
-        return ""
-
-    return _first_usable_email(_group_members(group))
 
 
 def _profile_display_name(profile: Any, fallback: str) -> str:
@@ -360,42 +528,6 @@ def _preferred_email_edges(client: Any, invitation_id: str) -> Dict[str, str]:
     return preferred_email_by_profile_id
 
 
-def _lookup_area_chair_contact(
-    client: Any,
-    profile_id: str,
-    preferred_email_by_profile_id: Dict[str, str],
-) -> Dict[str, str]:
-    try:
-        profile = client.get_profile(profile_id)
-    except Exception as exc:
-        _raise_if_authentication_error(exc)
-        try:
-            profiles = client.search_profiles(ids=[profile_id])
-            profile = profiles[0] if profiles else None
-        except Exception as fallback_exc:
-            _raise_if_authentication_error(fallback_exc)
-            profile = None
-
-    if profile is None:
-        logger.warning("Could not resolve OpenReview profile for area chair %s", profile_id)
-        return {
-            "name": _profile_id_to_display_name(profile_id),
-            "email": "",
-        }
-
-    edge_email = preferred_email_by_profile_id.get(profile_id, "")
-    email = (
-        edge_email
-        if _is_usable_email(edge_email)
-        else _profile_email(profile) or _profile_group_email(client, profile_id)
-    )
-
-    return {
-        "name": _profile_display_name(profile, profile_id),
-        "email": email,
-    }
-
-
 def _area_chair_contacts(
     client: Any,
     submissions: List[Dict[str, Any]],
@@ -414,29 +546,42 @@ def _area_chair_contacts(
 
     started_at = time.perf_counter()
     preferred_email_by_profile_id = _preferred_email_edges(client, preferred_emails_invitation_id)
-    contacts: Dict[str, Dict[str, str]] = {}
-    max_workers = min(MAX_AREA_CHAIR_CONTACT_WORKERS, len(area_chair_ids))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_area_chair_id = {
-            executor.submit(
-                _lookup_area_chair_contact,
-                client,
-                area_chair_id,
-                preferred_email_by_profile_id,
-            ): area_chair_id
-            for area_chair_id in area_chair_ids
-        }
-        for future in as_completed(future_to_area_chair_id):
-            area_chair_id = future_to_area_chair_id[future]
-            contacts[area_chair_id] = future.result()
+    try:
+        profiles = client.search_profiles(ids=area_chair_ids)
+    except Exception as exc:
+        _raise_if_authentication_error(exc)
+        logger.warning("Could not load area-chair profiles in bulk", exc_info=True)
+        profiles = []
 
-    contacts = {area_chair_id: contacts[area_chair_id] for area_chair_id in area_chair_ids}
+    profiles_by_id = {
+        str(profile.id): profile
+        for profile in profiles
+        if getattr(profile, "id", None)
+    }
+    contacts: Dict[str, Dict[str, str]] = {}
+    for area_chair_id in area_chair_ids:
+        profile = profiles_by_id.get(area_chair_id)
+        edge_email = preferred_email_by_profile_id.get(area_chair_id, "")
+        contacts[area_chair_id] = {
+            "name": (
+                _profile_display_name(profile, area_chair_id)
+                if profile is not None
+                else _profile_id_to_display_name(area_chair_id)
+            ),
+            "email": (
+                edge_email
+                if _is_usable_email(edge_email)
+                else _profile_email(profile) if profile is not None else ""
+            ),
+        }
+
     logger.warning(
-        "Dashboard load phase area_chair_contacts completed in %.2fs: profiles=%s emails=%s workers=%s",
+        "Dashboard load phase area_chair_contacts completed in %.2fs: requested=%s profiles=%s contacts=%s emails=%s",
         time.perf_counter() - started_at,
+        len(area_chair_ids),
+        len(profiles_by_id),
         len(contacts),
         sum(1 for contact in contacts.values() if contact.get("email")),
-        max_workers,
     )
     return contacts
 
@@ -569,9 +714,10 @@ class OpenReviewGateway:
                 progress_callback("venue", "Reading venue metadata...", 0, 0)
             phase_started_at = time.perf_counter()
             venue_group = client.get_group(venue_id)
-            submission_name = _content_value(venue_group.content.get("submission_name"), "Submission")
+            venue_content = dict(getattr(venue_group, "content", {}) or {})
+            submission_name = _content_value(venue_content.get("submission_name"), "Submission")
             preferred_emails_invitation_id = (
-                _content_value(venue_group.content.get("preferred_emails_id"), "").strip()
+                _content_value(venue_content.get("preferred_emails_id"), "").strip()
                 or f"{venue_id}/-/Preferred_Emails"
             )
             logger.warning(
@@ -592,6 +738,7 @@ class OpenReviewGateway:
                 client=client,
                 venue_id=venue_id,
                 submission_name=submission_name,
+                venue_content=venue_content,
                 profile=profile,
                 viewer_id=viewer_id,
                 load_started_at=load_started_at,
@@ -636,40 +783,37 @@ class OpenReviewGateway:
             if progress_callback:
                 progress_callback(
                     "submissions",
-                    "Fetching metadata for your assigned submissions...",
+                    "Fetching assigned submissions and replies in batches...",
                     0,
                     len(assigned_numbers),
                 )
             phase_started_at = time.perf_counter()
-            max_workers = min(MAX_ARR_DETAIL_LOAD_WORKERS, len(assigned_numbers))
             try:
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {
-                        executor.submit(
-                            client.get_all_notes,
-                            invitation=f"{venue_id}/-/{submission_name}",
-                            number=number,
-                        ): number
-                        for number in assigned_numbers
-                    }
-                    for completed, future in enumerate(as_completed(futures), start=1):
-                        submissions.extend(list(future.result()))
-                        if progress_callback:
-                            progress_callback(
-                                "submissions",
-                                f"Loaded metadata for {completed} of {len(assigned_numbers)} assigned submissions...",
-                                completed,
-                                len(assigned_numbers),
-                            )
+                submissions = _load_notes_by_numbers_with_replies(
+                    client,
+                    f"{venue_id}/-/{submission_name}",
+                    assigned_numbers,
+                )
             except Exception as exc:
                 _raise_if_authentication_error(exc)
                 raise DashboardFetchError(f"Could not load assigned submissions for venue '{venue_id}'.") from exc
+            if progress_callback:
+                progress_callback(
+                    "submissions",
+                    f"Loaded {len(submissions)} assigned submissions and their replies.",
+                    len(assigned_numbers),
+                    len(assigned_numbers),
+                )
             logger.warning(
-                "Dashboard load phase assigned_submission_metadata completed in %.2fs for %s: assignments=%s submissions=%s",
+                (
+                    "Dashboard load phase assigned_submission_batches completed in %.2fs for %s: "
+                    "assignments=%s submissions=%s requests_at_most=%s"
+                ),
                 time.perf_counter() - phase_started_at,
                 viewer_id,
                 len(assigned_numbers),
                 len(submissions),
+                (len(assigned_numbers) + OPENREVIEW_NOTE_BATCH_SIZE - 1) // OPENREVIEW_NOTE_BATCH_SIZE,
             )
 
         submissions.sort(key=lambda submission: int(getattr(submission, "number", 0) or 0))
@@ -689,6 +833,7 @@ class OpenReviewGateway:
         def make_submission_candidate(submission: Any, readers: List[str], content: Dict[str, Any]) -> Dict[str, Any]:
             prefix = f"{venue_id}/{submission_name}{submission.number}"
             sac_group = f"{prefix}/Senior_Area_Chairs"
+            replies = list(((getattr(submission, "details", {}) or {}).get("replies", []) or []))
             return {
                 "number": int(submission.number),
                 "id": submission.id,
@@ -696,9 +841,8 @@ class OpenReviewGateway:
                 "sac_group": sac_group,
                 "readers": readers,
                 "content": content,
-                "source_note": submission,
-                "replies": [],
-                "reply_count": 0,
+                "replies": [_note_to_dict(reply) for reply in replies],
+                "reply_count": len(replies),
             }
 
         for index, submission in enumerate(submissions, start=1):
@@ -735,46 +879,13 @@ class OpenReviewGateway:
             )
 
             candidate_submissions.append(candidate)
+            collected_replies += int(candidate["reply_count"])
 
         all_scoped_candidates = candidate_submissions + withdrawn_candidate_submissions
-
-        def load_candidate_replies(candidate: Dict[str, Any]) -> tuple[Dict[str, Any], List[Any]]:
-            source_details = getattr(candidate["source_note"], "details", {}) or {}
-            if "replies" in source_details:
-                return candidate, list(source_details.get("replies") or [])
-            detailed_note = client.get_note(str(candidate["id"]), details="replies")
-            replies = ((getattr(detailed_note, "details", {}) or {}).get("replies", []) or [])
-            return candidate, list(replies)
-
-        if all_scoped_candidates:
-            if progress_callback:
-                progress_callback(
-                    "replies",
-                    "Fetching replies for submissions in your SAC batch...",
-                    0,
-                    len(all_scoped_candidates),
-                )
-            max_workers = min(MAX_ARR_DETAIL_LOAD_WORKERS, len(all_scoped_candidates))
-            try:
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = [executor.submit(load_candidate_replies, candidate) for candidate in all_scoped_candidates]
-                    for completed, future in enumerate(as_completed(futures), start=1):
-                        candidate, replies = future.result()
-                        candidate["replies"] = [_note_to_dict(reply) for reply in replies]
-                        candidate["reply_count"] = len(replies)
-                        collected_replies += len(replies)
-                        if progress_callback:
-                            progress_callback(
-                                "replies",
-                                f"Loaded replies for {completed} of {len(all_scoped_candidates)} submissions...",
-                                completed,
-                                len(all_scoped_candidates),
-                            )
-            except Exception as exc:
-                _raise_if_authentication_error(exc)
-                raise DashboardFetchError(
-                    f"Could not load replies for assigned submissions in venue '{venue_id}'."
-                ) from exc
+        collected_replies += sum(
+            int(candidate["reply_count"])
+            for candidate in withdrawn_candidate_submissions
+        )
 
         scan_seconds = time.perf_counter() - scan_started_at
         logger.warning(
@@ -841,38 +952,22 @@ class OpenReviewGateway:
             except Exception as exc:
                 _raise_if_authentication_error(exc)
                 bulk_group_seconds = time.perf_counter() - bulk_group_started_at
-                logger.warning(
-                    (
-                        "Dashboard load phase bulk_paper_groups failed in %.2fs for %s; "
-                        "falling back to per-paper group lookups"
-                    ),
-                    bulk_group_seconds,
-                    viewer_id,
-                    exc_info=True,
-                )
-
-        fallback_group_calls = 0
-        fallback_group_lookup_seconds = 0.0
+                raise DashboardFetchError(
+                    f"Could not load assignment groups in bulk for venue '{venue_id}'."
+                ) from exc
 
         def resolve_group_members(group_id: str) -> List[str]:
-            nonlocal fallback_group_calls, fallback_group_lookup_seconds
-
             group = paper_groups_by_id.get(group_id)
-            if group is not None:
-                members, fully_resolved = _resolve_bulk_group_members(group, bulk_groups_by_id)
-                if fully_resolved:
-                    return members
-                logger.debug("Bulk group %s had unresolved anonymous members; falling back", group_id)
-
-            fallback_started_at = time.perf_counter()
-            fallback_group_calls += 1
-            try:
-                return list(client.get_group(group_id).members)
-            except Exception as exc:
-                _raise_if_authentication_error(exc)
-                raise DashboardFetchError(f"Could not resolve assignment group '{group_id}'.") from exc
-            finally:
-                fallback_group_lookup_seconds += time.perf_counter() - fallback_started_at
+            if group is None:
+                raise DashboardFetchError(
+                    f"OpenReview's bulk response did not include assignment group '{group_id}'."
+                )
+            members, fully_resolved = _resolve_bulk_group_members(group, bulk_groups_by_id)
+            if not fully_resolved:
+                raise DashboardFetchError(
+                    f"OpenReview's bulk response could not resolve anonymous members for assignment group '{group_id}'."
+                )
+            return members
 
         for index, submission in enumerate(candidate_submissions, start=1):
             if progress_callback:
@@ -947,9 +1042,9 @@ class OpenReviewGateway:
                 "Dashboard load phase scan_and_group_lookup completed in %.2fs for %s: "
                 "kept=%s withdrawn=%s skipped_withdrawn=%s skipped_desk_rejected=%s skipped_out_of_scope=%s "
                 "collected_replies=%s group_lookup_seconds=%.2fs bulk_groups_fetched=%s "
-                "bulk_groups_matched=%s fallback_group_calls=%s fallback_group_lookup_seconds=%.2fs"
+                "bulk_groups_matched=%s"
             ),
-            scan_seconds + bulk_group_seconds + fallback_group_lookup_seconds,
+            scan_seconds + bulk_group_seconds,
             viewer_id,
             len(collected_submissions),
             len(collected_withdrawn_submissions),
@@ -957,11 +1052,9 @@ class OpenReviewGateway:
             skipped_desk_rejected,
             skipped_out_of_scope,
             collected_replies,
-            bulk_group_seconds + fallback_group_lookup_seconds,
+            bulk_group_seconds,
             bulk_groups_fetched,
             bulk_groups_matched,
-            fallback_group_calls,
-            fallback_group_lookup_seconds,
         )
         logger.warning(
             "Dashboard snapshot fetch completed in %.2fs for %s: kept_submissions=%s withdrawn_submissions=%s",
@@ -994,58 +1087,156 @@ class OpenReviewGateway:
         client: Any,
         venue_id: str,
         submission_name: str,
+        venue_content: Dict[str, Any],
         profile: Dict[str, Any],
         viewer_id: str,
         load_started_at: float,
         progress_callback: ProgressCallback | None = None,
     ) -> Dict[str, Any]:
         paper_entry_invitation = f"{venue_id}/-/{submission_name}"
+        uses_direct_assignment_edges = _content_bool(venue_content.get("sac_paper_assignments"))
+        sac_assignment_invitation_id = _content_value(
+            venue_content.get("senior_area_chairs_assignment_id"),
+            "",
+        ).strip()
+        area_chair_assignment_invitation_id = _content_value(
+            venue_content.get("area_chairs_assignment_id"),
+            "",
+        ).strip()
+        commitment_notes: List[Any]
+        assigned_commitment_note_ids: set[str] = set()
+        my_assignment_groups: set[str] = set()
+        my_author_groups: set[str] = set()
+        has_venue_level_assignment = False
+        direct_area_chairs_by_note_id: Dict[str, List[str]] | None = None
 
-        try:
-            if progress_callback:
-                progress_callback("submissions", "Fetching commitment paper entries...", 0, 0)
-            phase_started_at = time.perf_counter()
-            commitment_notes = client.get_all_notes(invitation=paper_entry_invitation)
-            logger.warning(
-                "Dashboard load phase commitment_entries completed in %.2fs for %s: entries=%s",
-                time.perf_counter() - phase_started_at,
-                viewer_id,
-                len(commitment_notes),
-            )
-        except Exception as exc:
-            _raise_if_authentication_error(exc)
-            raise DashboardFetchError(f"Could not load commitment paper entries for venue '{venue_id}'.") from exc
+        if uses_direct_assignment_edges:
+            # Commitment venues represent ARR SACs as OpenReview Area Chairs.
+            # Keep Senior Area Chairs as a compatibility fallback for older setups.
+            ordered_role_assignment_candidates = [
+                ("Area_Chairs", area_chair_assignment_invitation_id),
+                ("Senior_Area_Chairs", sac_assignment_invitation_id),
+            ]
+            role_assignment_candidates: List[tuple[str, str]] = []
+            seen_assignment_invitation_ids: set[str] = set()
+            for role_name, invitation_id in ordered_role_assignment_candidates:
+                if invitation_id and invitation_id not in seen_assignment_invitation_ids:
+                    role_assignment_candidates.append((role_name, invitation_id))
+                    seen_assignment_invitation_ids.add(invitation_id)
+            if not role_assignment_candidates:
+                raise DashboardFetchError(
+                    f"Venue '{venue_id}' enables direct paper assignments but does not publish an AC or SAC assignment ID."
+                )
+            try:
+                if progress_callback:
+                    progress_callback("scope", "Resolving your direct commitment assignments...", 0, 0)
+                phase_started_at = time.perf_counter()
+                selected_assignment_edges: List[Any] = []
+                selected_role_name = ""
+                attempted_roles: List[str] = []
+                for role_name, invitation_id in role_assignment_candidates:
+                    role_edges = client.get_all_edges(
+                        invitation=invitation_id,
+                        tail=viewer_id,
+                    )
+                    role_note_ids = {
+                        str(getattr(edge, "head", "") or "").strip()
+                        for edge in role_edges
+                        if str(getattr(edge, "head", "") or "").strip()
+                    }
+                    attempted_roles.append(f"{role_name}:{len(role_note_ids)}")
+                    if not role_note_ids:
+                        continue
 
-        try:
-            if progress_callback:
-                progress_callback("scope", "Resolving your commitment assignments...", 0, len(commitment_notes))
-            phase_started_at = time.perf_counter()
-            matching_groups = client.get_all_groups(members=viewer_id, prefix=venue_id)
-            my_assignment_groups = {
-                group.id
-                for group in matching_groups
-                if group.id.endswith("Area_Chairs") or group.id.endswith("Senior_Area_Chairs")
-            }
-            my_author_groups = {
-                group.id
-                for group in matching_groups
-                if group.id.endswith("/Authors")
-            }
-            has_venue_level_assignment = _has_venue_level_assignment(my_assignment_groups, venue_id)
-            logger.warning(
-                (
-                    "Dashboard load phase commitment_assignment_groups completed in %.2fs for %s: "
-                    "assignment_groups=%s author_groups=%s venue_level_assignment=%s"
-                ),
-                time.perf_counter() - phase_started_at,
-                viewer_id,
-                len(my_assignment_groups),
-                len(my_author_groups),
-                has_venue_level_assignment,
-            )
-        except Exception as exc:
-            _raise_if_authentication_error(exc)
-            raise DashboardFetchError(f"Could not load commitment assignments for venue '{venue_id}'.") from exc
+                    selected_assignment_edges = list(role_edges)
+                    selected_role_name = role_name
+                    assigned_commitment_note_ids = role_note_ids
+                    my_assignment_groups.add(f"{venue_id}/{role_name}")
+                    my_assignment_groups.add(viewer_id)
+                    if role_name == "Area_Chairs":
+                        direct_area_chairs_by_note_id = _assignment_members_by_head_from_edges(
+                            selected_assignment_edges
+                        )
+                    break
+
+                commitment_notes_by_id = _load_notes_by_ids(client, assigned_commitment_note_ids)
+                missing_note_ids = assigned_commitment_note_ids - set(commitment_notes_by_id)
+                if missing_note_ids:
+                    raise DashboardFetchError(
+                        "OpenReview's direct SAC assignments referenced commitment entries that were not returned "
+                        f"({len(missing_note_ids)} missing)."
+                    )
+                commitment_notes = [
+                    commitment_notes_by_id[note_id]
+                    for note_id in assigned_commitment_note_ids
+                ]
+                logger.warning(
+                    (
+                        "Dashboard load phase commitment_direct_assignments completed in %.2fs for %s: "
+                        "role=%s edges=%s entries=%s attempts=%s"
+                    ),
+                    time.perf_counter() - phase_started_at,
+                    viewer_id,
+                    selected_role_name or "none",
+                    len(selected_assignment_edges),
+                    len(commitment_notes),
+                    ",".join(attempted_roles),
+                )
+            except DashboardFetchError:
+                raise
+            except Exception as exc:
+                _raise_if_authentication_error(exc)
+                raise DashboardFetchError(
+                    f"Could not load direct commitment paper assignments for venue '{venue_id}'."
+                ) from exc
+        else:
+            try:
+                if progress_callback:
+                    progress_callback("submissions", "Fetching commitment paper entries...", 0, 0)
+                phase_started_at = time.perf_counter()
+                commitment_notes = client.get_all_notes(invitation=paper_entry_invitation)
+                logger.warning(
+                    "Dashboard load phase commitment_entries completed in %.2fs for %s: entries=%s",
+                    time.perf_counter() - phase_started_at,
+                    viewer_id,
+                    len(commitment_notes),
+                )
+            except Exception as exc:
+                _raise_if_authentication_error(exc)
+                raise DashboardFetchError(
+                    f"Could not load commitment paper entries for venue '{venue_id}'."
+                ) from exc
+
+            try:
+                if progress_callback:
+                    progress_callback("scope", "Resolving your commitment assignments...", 0, len(commitment_notes))
+                phase_started_at = time.perf_counter()
+                matching_groups = client.get_all_groups(members=viewer_id, prefix=venue_id)
+                my_assignment_groups = {
+                    group.id
+                    for group in matching_groups
+                    if group.id.endswith("Area_Chairs") or group.id.endswith("Senior_Area_Chairs")
+                }
+                my_author_groups = {
+                    group.id
+                    for group in matching_groups
+                    if group.id.endswith("/Authors")
+                }
+                has_venue_level_assignment = _has_venue_level_assignment(my_assignment_groups, venue_id)
+                logger.warning(
+                    (
+                        "Dashboard load phase commitment_assignment_groups completed in %.2fs for %s: "
+                        "assignment_groups=%s author_groups=%s venue_level_assignment=%s"
+                    ),
+                    time.perf_counter() - phase_started_at,
+                    viewer_id,
+                    len(my_assignment_groups),
+                    len(my_author_groups),
+                    has_venue_level_assignment,
+                )
+            except Exception as exc:
+                _raise_if_authentication_error(exc)
+                raise DashboardFetchError(f"Could not load commitment assignments for venue '{venue_id}'.") from exc
 
         collected_submissions: List[Dict[str, Any]] = []
         total_entries = len(commitment_notes)
@@ -1057,6 +1248,7 @@ class OpenReviewGateway:
         skipped_author_entries = 0
         commitment_candidates: List[Dict[str, Any]] = []
 
+        commitment_notes.sort(key=lambda note: _safe_note_number(note))
         for index, batch_note in enumerate(commitment_notes, start=1):
             note_number = _safe_note_number(batch_note, index)
             if progress_callback:
@@ -1071,13 +1263,19 @@ class OpenReviewGateway:
             batch_reader_set = set(batch_readers)
             batch_assignment_match = bool(my_assignment_groups and (batch_reader_set & my_assignment_groups))
             batch_author_match = bool(my_author_groups and (batch_reader_set & my_author_groups))
-            if batch_author_match and not batch_assignment_match:
+            if not uses_direct_assignment_edges and batch_author_match and not batch_assignment_match:
                 skipped_author_entries += 1
                 skipped_out_of_scope += 1
                 skipped_out_of_scope_before_forum_load += 1
                 continue
 
-            if my_assignment_groups and batch_readers and not batch_assignment_match and not has_venue_level_assignment:
+            if (
+                not uses_direct_assignment_edges
+                and my_assignment_groups
+                and batch_readers
+                and not batch_assignment_match
+                and not has_venue_level_assignment
+            ):
                 skipped_out_of_scope += 1
                 skipped_out_of_scope_before_forum_load += 1
                 continue
@@ -1100,26 +1298,74 @@ class OpenReviewGateway:
                 }
             )
 
+        area_chairs_by_note_id: Dict[str, List[str]] | None = direct_area_chairs_by_note_id
         commitment_groups_by_id: Dict[str, Any] = {}
         if commitment_candidates:
+            # Reviewer assignment totals are not displayed or exported in commitment mode.
+            # Avoid spending quota and transferring the venue-wide reviewer edge set.
+            if area_chair_assignment_invitation_id and area_chairs_by_note_id is None:
+                try:
+                    phase_started_at = time.perf_counter()
+                    area_chairs_by_note_id = _assignment_members_by_head(
+                        client,
+                        area_chair_assignment_invitation_id,
+                    )
+                    logger.warning(
+                        "Dashboard load phase commitment_area_chair_edges completed in %.2fs for %s: papers=%s",
+                        time.perf_counter() - phase_started_at,
+                        viewer_id,
+                        len(area_chairs_by_note_id),
+                    )
+                except Exception as exc:
+                    _raise_if_authentication_error(exc)
+                    raise DashboardFetchError(
+                        f"Could not load area-chair assignments in bulk for venue '{venue_id}'."
+                    ) from exc
+
+            if area_chairs_by_note_id is None:
+                phase_started_at = time.perf_counter()
+                try:
+                    commitment_groups = client.get_all_groups(prefix=venue_id)
+                    commitment_groups_by_id = {group.id: group for group in commitment_groups}
+                    logger.warning(
+                        "Dashboard load phase commitment_groups completed in %.2fs for %s: groups=%s",
+                        time.perf_counter() - phase_started_at,
+                        viewer_id,
+                        len(commitment_groups_by_id),
+                    )
+                except Exception as exc:
+                    _raise_if_authentication_error(exc)
+                    raise DashboardFetchError(
+                        f"Could not load commitment assignment groups in bulk for venue '{venue_id}'."
+                    ) from exc
+
+        prefetched_forum_notes: Dict[str, Any] = {}
+        if commitment_candidates:
+            if progress_callback:
+                progress_callback(
+                    "papers",
+                    "Loading linked commitment paper forums in batches...",
+                    0,
+                    len(commitment_candidates),
+                )
             phase_started_at = time.perf_counter()
             try:
-                commitment_groups = client.get_all_groups(prefix=venue_id)
-                commitment_groups_by_id = {group.id: group for group in commitment_groups}
+                prefetched_forum_notes = _load_notes_by_ids_with_replies(
+                    client,
+                    (str(candidate["forum_id"]) for candidate in commitment_candidates),
+                )
                 logger.warning(
-                    "Dashboard load phase commitment_groups completed in %.2fs for %s: groups=%s",
+                    "Dashboard load phase commitment_forum_batches completed in %.2fs for %s: requested=%s loaded=%s",
                     time.perf_counter() - phase_started_at,
                     viewer_id,
-                    len(commitment_groups_by_id),
+                    len(commitment_candidates),
+                    len(prefetched_forum_notes),
                 )
             except Exception as exc:
                 _raise_if_authentication_error(exc)
-                logger.warning(
-                    "Dashboard load phase commitment_groups failed in %.2fs for %s; falling back to per-paper group lookups",
-                    time.perf_counter() - phase_started_at,
-                    viewer_id,
-                    exc_info=True,
-                )
+                raise DashboardFetchError(
+                    f"Could not load linked paper forums for venue '{venue_id}'."
+                ) from exc
 
         def load_commitment_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
             batch_note = candidate["batch_note"]
@@ -1128,12 +1374,10 @@ class OpenReviewGateway:
             commitment_url = str(candidate["commitment_url"])
             note_number = int(candidate["note_number"])
 
-            try:
-                forum_note = client.get_note(forum_id, details="replies")
-            except Exception as exc:
-                _raise_if_authentication_error(exc)
+            forum_note = prefetched_forum_notes.get(forum_id)
+            if forum_note is None:
                 logger.warning(
-                    "Skipping commitment entry %s because linked forum %s could not be loaded",
+                    "Skipping commitment entry %s because linked forum %s was absent from the batch response",
                     note_number,
                     forum_id,
                 )
@@ -1149,29 +1393,36 @@ class OpenReviewGateway:
             reader_set = set(readers)
             reader_assignment_match = bool(my_assignment_groups and (reader_set & my_assignment_groups))
             reader_author_match = bool(my_author_groups and (reader_set & my_author_groups))
-            if reader_author_match and not reader_assignment_match:
+            if not uses_direct_assignment_edges and reader_author_match and not reader_assignment_match:
                 return {"status": "author"}
 
-            if my_assignment_groups and not reader_assignment_match and not has_venue_level_assignment:
+            if (
+                not uses_direct_assignment_edges
+                and my_assignment_groups
+                and not reader_assignment_match
+                and not has_venue_level_assignment
+            ):
                 return {"status": "out_of_scope"}
 
             effective_readers = set(readers)
-            if has_venue_level_assignment:
+            if uses_direct_assignment_edges:
+                effective_readers.add(viewer_id)
+            elif has_venue_level_assignment:
                 effective_readers.update(my_assignment_groups)
             if not my_assignment_groups:
                 effective_readers.add(viewer_id)
 
             replies = ((getattr(forum_note, "details", {}) or {}).get("replies", []) or [])
             area_chair = self._commitment_area_chair(
-                client=client,
                 batch_note=batch_note,
                 forum_note=forum_note,
                 venue_id=venue_id,
                 submission_name=submission_name,
                 groups_by_id=commitment_groups_by_id,
+                assignments_by_note_id=area_chairs_by_note_id,
             )
             reviewers = self._commitment_reviewers(
-                client=client,
+                batch_note=batch_note,
                 forum_note=forum_note,
                 venue_id=venue_id,
                 submission_name=submission_name,
@@ -1192,59 +1443,43 @@ class OpenReviewGateway:
                 },
             }
 
-        if commitment_candidates and progress_callback:
-            progress_callback(
-                "papers",
-                "Loading linked commitment paper forums...",
-                0,
-                len(commitment_candidates),
-            )
-
         if commitment_candidates:
             load_started = time.perf_counter()
-            max_workers = min(MAX_COMMITMENT_LOAD_WORKERS, len(commitment_candidates))
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_candidate = {
-                    executor.submit(load_commitment_candidate, candidate): candidate
-                    for candidate in commitment_candidates
-                }
-                for completed, future in enumerate(as_completed(future_to_candidate), start=1):
-                    if progress_callback:
-                        progress_callback(
-                            "papers",
-                            f"Loaded {completed} of {len(commitment_candidates)} linked paper forums...",
-                            completed,
-                            len(commitment_candidates),
-                        )
+            for completed, candidate in enumerate(commitment_candidates, start=1):
+                if progress_callback:
+                    progress_callback(
+                        "papers",
+                        f"Loaded {completed} of {len(commitment_candidates)} linked paper forums...",
+                        completed,
+                        len(commitment_candidates),
+                    )
 
-                    try:
-                        result = future.result()
-                    except Exception as exc:
-                        _raise_if_authentication_error(exc)
-                        candidate = future_to_candidate[future]
-                        raise DashboardFetchError(
-                            f"Could not load commitment entry {candidate['note_number']}."
-                        ) from exc
-                    status = result.get("status")
-                    if status == "kept":
-                        collected_submissions.append(result["submission"])
-                    elif status == "forum_load_error":
-                        skipped_forum_load += 1
-                    elif status == "ineligible":
-                        skipped_ineligible += 1
-                    elif status == "author":
-                        skipped_author_entries += 1
-                        skipped_out_of_scope += 1
-                    elif status == "out_of_scope":
-                        skipped_out_of_scope += 1
+                try:
+                    result = load_commitment_candidate(candidate)
+                except Exception as exc:
+                    _raise_if_authentication_error(exc)
+                    raise DashboardFetchError(
+                        f"Could not load commitment entry {candidate['note_number']}."
+                    ) from exc
+                status = result.get("status")
+                if status == "kept":
+                    collected_submissions.append(result["submission"])
+                elif status == "forum_load_error":
+                    skipped_forum_load += 1
+                elif status == "ineligible":
+                    skipped_ineligible += 1
+                elif status == "author":
+                    skipped_author_entries += 1
+                    skipped_out_of_scope += 1
+                elif status == "out_of_scope":
+                    skipped_out_of_scope += 1
 
             logger.warning(
-                "Dashboard load phase commitment_linked_forums completed in %.2fs for %s: candidates=%s kept=%s workers=%s",
+                "Dashboard load phase commitment_linked_forums completed in %.2fs for %s: candidates=%s kept=%s",
                 time.perf_counter() - load_started,
                 viewer_id,
                 len(commitment_candidates),
                 len(collected_submissions),
-                max_workers,
             )
 
         if skipped_missing_link or skipped_forum_load:
@@ -1291,28 +1526,35 @@ class OpenReviewGateway:
 
     def _commitment_area_chair(
         self,
-        client: Any,
         batch_note: Any,
         forum_note: Any,
         venue_id: str,
         submission_name: str,
-        groups_by_id: Dict[str, Any] | None = None,
+        groups_by_id: Dict[str, Any],
+        assignments_by_note_id: Dict[str, List[str]] | None = None,
     ) -> str:
+        batch_note_id = str(getattr(batch_note, "id", "") or "")
+        if assignments_by_note_id is not None:
+            assigned_area_chairs = assignments_by_note_id.get(batch_note_id, [])
+            return assigned_area_chairs[0] if assigned_area_chairs else ""
+
         batch_content = getattr(batch_note, "content", {}) or {}
         content_area_chair = _first_content_value(batch_content, ("area_chair", "Area Chair", "area chair"))
         if content_area_chair:
             return content_area_chair
 
-        paper_number = _safe_note_number(forum_note)
-        if not paper_number:
+        batch_number = _safe_note_number(batch_note)
+        forum_number = _safe_note_number(forum_note)
+        if not batch_number and not forum_number:
             return ""
 
         members = _resolve_group_members(
-            client,
-            (
-                f"{venue_id}/{submission_name}{paper_number}/Area_Chairs",
-                f"{venue_id}/Submission{paper_number}/Area_Chairs",
-                f"{venue_id}/Paper{paper_number}/Area_Chairs",
+            _paper_assignment_group_ids(
+                venue_id,
+                submission_name,
+                "Area_Chairs",
+                batch_number,
+                forum_number,
             ),
             groups_by_id,
             continue_on_empty=True,
@@ -1324,22 +1566,24 @@ class OpenReviewGateway:
 
     def _commitment_reviewers(
         self,
-        client: Any,
+        batch_note: Any,
         forum_note: Any,
         venue_id: str,
         submission_name: str,
-        groups_by_id: Dict[str, Any] | None = None,
+        groups_by_id: Dict[str, Any],
     ) -> List[str]:
-        paper_number = _safe_note_number(forum_note)
-        if not paper_number:
+        batch_number = _safe_note_number(batch_note)
+        forum_number = _safe_note_number(forum_note)
+        if not batch_number and not forum_number:
             return []
 
         return _resolve_group_members(
-            client,
-            (
-                f"{venue_id}/{submission_name}{paper_number}/Reviewers",
-                f"{venue_id}/Submission{paper_number}/Reviewers",
-                f"{venue_id}/Paper{paper_number}/Reviewers",
+            _paper_assignment_group_ids(
+                venue_id,
+                submission_name,
+                "Reviewers",
+                batch_number,
+                forum_number,
             ),
             groups_by_id,
         )

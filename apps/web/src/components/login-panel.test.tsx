@@ -10,9 +10,14 @@ const defaultVenueId = "aclweb.org/ACL/ARR/2026/May";
 type LoginHarnessProps = {
   isBusy?: boolean;
   onLogin?: (username: string, password: string, venueId: string) => Promise<void>;
+  recentVenueIds?: string[];
 };
 
-function LoginHarness({ isBusy = false, onLogin = vi.fn(async () => undefined) }: LoginHarnessProps) {
+function LoginHarness({
+  isBusy = false,
+  onLogin = vi.fn(async () => undefined),
+  recentVenueIds = []
+}: LoginHarnessProps) {
   const [venueId, setVenueId] = useState(defaultVenueId);
 
   return createElement(LoginPanel, {
@@ -20,6 +25,7 @@ function LoginHarness({ isBusy = false, onLogin = vi.fn(async () => undefined) }
     isBusy,
     onLogin,
     onVenueIdChange: setVenueId,
+    recentVenueIds,
     venueId
   });
 }
@@ -70,6 +76,32 @@ describe("LoginPanel", () => {
     expect(passwordInput).toHaveValue("");
     expect(usernameInput).toHaveValue("chair@example.com");
     expect(screen.getByLabelText("Venue ID")).toHaveValue(defaultVenueId);
+  });
+
+  it("offers recent venues as a keyboard-selectable dropdown before login", async () => {
+    render(
+      createElement(LoginHarness, {
+        recentVenueIds: [
+          "aclweb.org/ACL/2026/Conference",
+          "aclweb.org/ACL/ARR/2026/March"
+        ]
+      })
+    );
+    const user = userEvent.setup();
+    const venueInput = screen.getByRole("combobox", { name: "Venue ID" });
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await user.clear(venueInput);
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "aclweb.org/ACL/2026/Conference" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "aclweb.org/ACL/ARR/2026/March" })).toBeInTheDocument();
+
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(venueInput).toHaveValue("aclweb.org/ACL/2026/Conference");
+    expect(venueInput).toHaveFocus();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("disables the complete form and reports progress while busy", () => {

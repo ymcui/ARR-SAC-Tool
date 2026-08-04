@@ -26,6 +26,7 @@ from app.services.openreview_gateway import (
     AuthenticationMfaRequired,
     AuthenticationServiceError,
     DashboardAuthenticationError,
+    DashboardRateLimitError,
 )
 from app.session_store import SessionStore
 
@@ -221,6 +222,34 @@ def test_expired_openreview_session_returns_401_and_deletes_local_session() -> N
         params={"venueId": "aclweb.org/ACL/ARR/2026/March"},
     )
     assert progress.status_code == 401
+
+
+def test_openreview_rate_limit_returns_429_and_finishes_progress() -> None:
+    class RateLimitedGateway(FakeGateway):
+        def fetch_dashboard_snapshot(self, client, venue_id: str, progress_callback=None) -> dict:
+            raise DashboardRateLimitError(
+                "OpenReview rate limit reached. Try Load / Refresh again after 2026-08-04 08:13:48 UTC."
+            )
+
+    client = TestClient(create_app(gateway=RateLimitedGateway(load_fixture()), session_store=SessionStore()))
+    client.post(
+        "/api/session/login",
+        json={"username": "sac@example.com", "password": "password"},
+    )
+
+    response = client.get(
+        "/api/dashboard",
+        params={"venueId": "EMNLP/2026/Conference", "loadId": "rate-limited-load"},
+    )
+    progress = client.get(
+        "/api/dashboard/progress",
+        params={"venueId": "EMNLP/2026/Conference"},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"].endswith("2026-08-04 08:13:48 UTC.")
+    assert progress.json()["done"] is True
+    assert progress.json()["error"] == response.json()["detail"]
 
 
 def test_openapi_advertises_application_version() -> None:

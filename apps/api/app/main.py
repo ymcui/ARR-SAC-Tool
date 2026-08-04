@@ -23,6 +23,7 @@ from app.services.openreview_gateway import (
     AuthenticationServiceError,
     DashboardAuthenticationError,
     DashboardFetchError,
+    DashboardRateLimitError,
     OpenReviewGateway,
 )
 from app.session_store import SessionStore
@@ -279,6 +280,11 @@ def create_app(
                 load_error_status = 401
                 app.state.sessions.delete_session(session_id)
                 raise HTTPException(status_code=401, detail=load_error) from exc
+            except DashboardRateLimitError as exc:
+                load_error = str(exc)
+                load_error_status = 429
+                set_progress("error", load_error, 0, 0, done=True, error=load_error)
+                raise HTTPException(status_code=429, detail=load_error) from exc
             except DashboardFetchError as exc:
                 load_error = str(exc)
                 load_error_status = 400

@@ -2,9 +2,12 @@
 
 import { FormEvent, useState } from "react";
 
+import { VenueIdCombobox } from "@/components/venue-id-combobox";
+
 type LoginPanelProps = {
   isBusy: boolean;
   error: string | null;
+  recentVenueIds?: string[];
   venueId: string;
   onVenueIdChange: (value: string) => void;
   onLogin: (username: string, password: string, venueId: string) => Promise<void>;
@@ -13,6 +16,7 @@ type LoginPanelProps = {
 export function LoginPanel({
   isBusy,
   error,
+  recentVenueIds = [],
   venueId,
   onVenueIdChange,
   onLogin
@@ -95,20 +99,21 @@ export function LoginPanel({
             />
           </label>
 
-          <label className="field">
-            <span>Venue ID</span>
-            <input
-              autoComplete="off"
+          <div className="field">
+            <label htmlFor="login-venue-id">
+              <span>Venue ID</span>
+            </label>
+            <VenueIdCombobox
               disabled={isBusy}
+              inputId="login-venue-id"
+              listboxId="login-recent-venue-ids"
               name="venueId"
-              onChange={(event) => onVenueIdChange(event.target.value)}
-              placeholder="aclweb.org/ACL/ARR/2026/May"
+              onChange={onVenueIdChange}
+              recentVenueIds={recentVenueIds}
               required
-              spellCheck={false}
-              type="text"
               value={venueId}
             />
-          </label>
+          </div>
         </div>
 
         <div className="login-form-actions">

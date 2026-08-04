@@ -7,16 +7,23 @@ SAC Monitor helps you load your assigned OpenReview venue, inspect paper status,
 ![banner](./assets/banner.jpg)
 
 > [!NOTE]
-> - **Use the latest code when available (an icon will show if there are updates) to get the latest features and bug fixes.**
-> - If you prefer the jupyter notebook version, please check `old` branch, which is the version I used in ARR Feb 2025 cycle (will not be maintained). 
-> - If you want to run the dashboard in a Colab notebook, please check the "[Running In Colab](#running-in-colab)" section below for instructions.
+> - **[NEW] For EMNLP 2026, you may hit "rate limit" when loading the venue multiple times. Please export to xlsx and avoid reloading in a short period of time.**
+> - Use the latest code when available (an icon will show if there are updates) to get the latest features and bug fixes.
 > - For detailed changelog, please check [CHANGELOG.md](./CHANGELOG.md).
 
 ## Latest Supported Venues
 
-| ARR Stage                                                    | Commitment Stage               |
-| ------------------------------------------------------------ | ------------------------------ |
-| aclweb.org/ACL/ARR/2026/January <br/>aclweb.org/ACL/ARR/2026/March<br/>**aclweb.org/ACL/ARR/2026/May** | aclweb.org/ACL/2026/Conference |
+#### ARR Stage
+
+- aclweb.org/ACL/ARR/2026/January
+- aclweb.org/ACL/ARR/2026/March
+- aclweb.org/ACL/ARR/2026/May
+- **aclweb.org/ACL/ARR/2026/August**
+
+#### Commitment Stage
+
+- aclweb.org/ACL/2026/Conference
+- **EMNLP/2026/Conference**
 
 ## Requirements
 

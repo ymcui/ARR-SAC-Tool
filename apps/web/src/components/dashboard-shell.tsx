@@ -719,7 +719,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
       }
 
       if (!response.ok) {
-        shouldAttemptRecovery = response.status >= 500 || response.status === 408 || response.status === 429;
+        shouldAttemptRecovery = response.status >= 500 || response.status === 408;
         throw await responseError(timedResponse, "Could not load the selected venue.");
       }
 
@@ -1002,6 +1002,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
                 setVenueId(value);
                 window.sessionStorage.setItem(VENUE_STORAGE_KEY, value);
               }}
+              recentVenueIds={recentVenueIds}
               venueId={venueId}
             />
           ) : null}

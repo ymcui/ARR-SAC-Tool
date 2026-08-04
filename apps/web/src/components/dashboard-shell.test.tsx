@@ -210,6 +210,28 @@ describe("DashboardShell", () => {
     expect(window.sessionStorage.getItem("arr-sac-dashboard.viewer")).toBeNull();
   });
 
+  it("offers persisted recent venues from the login-page venue selector", async () => {
+    window.localStorage.setItem(
+      "arr-sac-dashboard.recent-venues",
+      JSON.stringify(["aclweb.org/ACL/2026/Conference", "aclweb.org/ACL/ARR/2026/March"])
+    );
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(createElement(DashboardShell));
+
+    const user = userEvent.setup();
+    const venueInput = await screen.findByRole("combobox", { name: "Venue ID" });
+    await user.clear(venueInput);
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "aclweb.org/ACL/2026/Conference" }));
+
+    expect(venueInput).toHaveValue("aclweb.org/ACL/2026/Conference");
+    expect(window.sessionStorage.getItem("arr-sac-dashboard.venue")).toBe(
+      "aclweb.org/ACL/2026/Conference"
+    );
+  });
+
   it("accepts a restored viewer with an empty fullname and falls back to its profile id", async () => {
     const viewerWithoutFullname = { id: "~Viewer_Without_Name1", fullname: "" };
     window.sessionStorage.setItem(
@@ -1143,6 +1165,25 @@ describe("DashboardShell", () => {
     expect(window.sessionStorage.getItem("arr-sac-dashboard.venue")).toBe(
       "aclweb.org/ACL/2026/Conference"
     );
+  });
+
+  it("surfaces an OpenReview rate limit immediately without starting recovery polling", async () => {
+    const rateLimitMessage =
+      "OpenReview rate limit reached. Try Load / Refresh again after 2026-08-04 08:13:48 UTC.";
+    const fetchMock = createFetchMock(
+      createResponse(dashboardFixture.viewer),
+      createResponse({ detail: rateLimitMessage }, false, 429)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(createElement(DashboardShell));
+    const user = userEvent.setup();
+
+    await signInAndLoad(user, "EMNLP/2026/Conference");
+
+    expect(await screen.findAllByText(rateLimitMessage)).not.toHaveLength(0);
+    const requestPaths = appFetchCalls(fetchMock).map(([input]) => apiRequestPath(input));
+    expect(requestPaths.filter((path) => path.startsWith("/api/dashboard?"))).toHaveLength(1);
+    expect(requestPaths.some((path) => path.startsWith("/api/dashboard/progress"))).toBe(false);
   });
 
   it("restores the selected venue context when retrying a retained dashboard after a failed switch", async () => {
