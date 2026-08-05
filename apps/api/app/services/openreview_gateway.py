@@ -297,7 +297,10 @@ def _note_to_dict(note: Any) -> Dict[str, Any]:
             "signatures": list(getattr(note, "signatures", []) or []),
             "invitations": list(getattr(note, "invitations", []) or []),
             "content": getattr(note, "content", {}) or {},
+            "cdate": getattr(note, "cdate", 0) or 0,
+            "mdate": getattr(note, "mdate", 0) or 0,
             "tcdate": getattr(note, "tcdate", 0) or 0,
+            "tmdate": getattr(note, "tmdate", 0) or 0,
         }
 
     return {
@@ -308,7 +311,10 @@ def _note_to_dict(note: Any) -> Dict[str, Any]:
         "signatures": list(raw.get("signatures", []) or []),
         "invitations": list(raw.get("invitations", []) or []),
         "content": raw.get("content", {}) or {},
+        "cdate": raw.get("cdate", 0) or 0,
+        "mdate": raw.get("mdate", 0) or 0,
         "tcdate": raw.get("tcdate", 0) or 0,
+        "tmdate": raw.get("tmdate", 0) or 0,
     }
 
 
@@ -1457,6 +1463,7 @@ class OpenReviewGateway:
         skipped_out_of_scope_before_forum_load = 0
         skipped_author_entries = 0
         commitment_candidates: List[Dict[str, Any]] = []
+        paper_access_issues: List[Dict[str, Any]] = []
 
         commitment_notes.sort(key=lambda note: _safe_note_number(note))
         for index, batch_note in enumerate(commitment_notes, start=1):
@@ -1490,12 +1497,37 @@ class OpenReviewGateway:
                 skipped_out_of_scope_before_forum_load += 1
                 continue
 
+            commitment_url = OPENREVIEW_FORUM_URL.format(
+                paper_id=getattr(batch_note, "id", "")
+            )
             try:
                 paper_link = _extract_paper_link(batch_note)
+            except ValueError:
+                skipped_missing_link += 1
+                logger.warning("Skipping commitment entry %s with missing or invalid Paper Link", note_number)
+                paper_access_issues.append(
+                    {
+                        "paperNumber": note_number,
+                        "reason": "invalid_paper_link",
+                        "commitmentUrl": commitment_url,
+                        "forumUrl": "",
+                    }
+                )
+                continue
+
+            try:
                 forum_id = _extract_forum_id_from_link(paper_link)
             except ValueError:
                 skipped_missing_link += 1
                 logger.warning("Skipping commitment entry %s with missing or invalid Paper Link", note_number)
+                paper_access_issues.append(
+                    {
+                        "paperNumber": note_number,
+                        "reason": "invalid_paper_link",
+                        "commitmentUrl": commitment_url,
+                        "forumUrl": "",
+                    }
+                )
                 continue
 
             commitment_candidates.append(
@@ -1503,7 +1535,8 @@ class OpenReviewGateway:
                     "batch_note": batch_note,
                     "batch_readers": batch_readers,
                     "forum_id": forum_id,
-                    "commitment_url": OPENREVIEW_FORUM_URL.format(paper_id=getattr(batch_note, "id", "")),
+                    "commitment_url": commitment_url,
+                    "forum_url": OPENREVIEW_FORUM_URL.format(paper_id=forum_id),
                     "note_number": note_number,
                 }
             )
@@ -1619,6 +1652,7 @@ class OpenReviewGateway:
             batch_readers = candidate["batch_readers"]
             forum_id = str(candidate["forum_id"])
             commitment_url = str(candidate["commitment_url"])
+            forum_url = str(candidate["forum_url"])
             note_number = int(candidate["note_number"])
 
             forum_note = prefetched_forum_notes.get(forum_id)
@@ -1628,7 +1662,15 @@ class OpenReviewGateway:
                     note_number,
                     forum_id,
                 )
-                return {"status": "forum_load_error"}
+                return {
+                    "status": "forum_load_error",
+                    "issue": {
+                        "paperNumber": note_number,
+                        "reason": "unavailable_linked_forum",
+                        "commitmentUrl": commitment_url,
+                        "forumUrl": forum_url,
+                    },
+                }
 
             forum_content = dict(getattr(forum_note, "content", {}) or {})
             for key, value in (getattr(batch_note, "content", {}) or {}).items():
@@ -1723,6 +1765,7 @@ class OpenReviewGateway:
                     collected_submissions.append(result["submission"])
                 elif status == "forum_load_error":
                     skipped_forum_load += 1
+                    paper_access_issues.append(result["issue"])
                 elif status == "ineligible":
                     skipped_ineligible += 1
                 elif status == "author":
@@ -1739,16 +1782,18 @@ class OpenReviewGateway:
                 len(collected_submissions),
             )
 
-        if skipped_missing_link or skipped_forum_load:
-            raise DashboardFetchError(
-                "The commitment dashboard could not be loaded completely: "
-                f"invalid paper links={skipped_missing_link}, unavailable linked forums={skipped_forum_load}."
-            )
-
         if progress_callback:
+            issue_suffix = (
+                f" {len(paper_access_issues)} assigned paper(s) need access review."
+                if paper_access_issues
+                else ""
+            )
             progress_callback(
                 "papers",
-                f"Collected {len(collected_submissions)} committed papers in your assignment batch.",
+                (
+                    f"Collected {len(collected_submissions)} committed papers in your assignment batch."
+                    f"{issue_suffix}"
+                ),
                 total_entries,
                 total_entries,
             )
@@ -1779,6 +1824,7 @@ class OpenReviewGateway:
             "my_sac_groups": sorted(my_assignment_groups) if my_assignment_groups else [viewer_id],
             "submissions": collected_submissions,
             "withdrawn_submissions": [],
+            "paper_access_issues": paper_access_issues,
         }
 
     def _commitment_area_chair(

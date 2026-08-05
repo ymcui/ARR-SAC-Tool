@@ -317,6 +317,49 @@ def test_dashboard_cache_and_refresh_flow() -> None:
     assert after_logout.status_code == 401
 
 
+def test_dashboard_returns_and_caches_accessible_papers_with_access_warning() -> None:
+    snapshot = load_fixture()
+    snapshot["paper_access_issues"] = [
+        {
+            "paperNumber": 2922,
+            "reason": "unavailable_linked_forum",
+            "commitmentUrl": "https://openreview.net/forum?id=commitment-2922",
+            "forumUrl": "https://openreview.net/forum?id=linked-paper-2922",
+        }
+    ]
+    gateway = FakeGateway(snapshot)
+    app = create_app(gateway=gateway, session_store=SessionStore(cache_ttl_seconds=999))
+    client = TestClient(app)
+
+    login_response = client.post(
+        "/api/session/login",
+        json={"username": "demo@example.com", "password": "secret"},
+    )
+    assert login_response.status_code == 200
+
+    first = client.get(
+        "/api/dashboard",
+        params={"venueId": "aclweb.org/ACL/2026/Conference", "loadId": "partial-load"},
+    )
+    cached = client.get(
+        "/api/dashboard",
+        params={"venueId": "aclweb.org/ACL/2026/Conference"},
+    )
+    progress = client.get(
+        "/api/dashboard/progress",
+        params={"venueId": "aclweb.org/ACL/2026/Conference"},
+    )
+
+    assert first.status_code == 200
+    assert cached.status_code == 200
+    assert first.json()["summary"]["totalPapers"] > 0
+    assert first.json()["paperAccessIssues"] == snapshot["paper_access_issues"]
+    assert cached.json()["paperAccessIssues"] == snapshot["paper_access_issues"]
+    assert gateway.fetch_count == 1
+    assert progress.json()["done"] is True
+    assert progress.json()["error"] is None
+
+
 def test_dashboard_reuses_inflight_load_for_duplicate_refreshes() -> None:
     gateway = BlockingGateway(load_fixture())
     app = create_app(gateway=gateway, session_store=SessionStore(cache_ttl_seconds=999))

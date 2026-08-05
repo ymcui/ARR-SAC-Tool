@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 
+import { createNpmInvocation } from "./npm-invocation.mjs";
 import { terminateProcessTree } from "./process-tree.mjs";
 import { apiPythonCommand } from "./python-command.mjs";
 
 const root = process.cwd();
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const apiHost = process.env.ARR_SAC_API_HOST ?? "127.0.0.1";
 const apiPort = process.env.ARR_SAC_API_PORT ?? "8001";
 const webHost = process.env.ARR_SAC_WEB_HOST ?? "127.0.0.1";
@@ -31,8 +31,7 @@ const commands = [
   },
   {
     name: "web",
-    command: npmCommand,
-    args: [
+    ...createNpmInvocation([
       "run",
       "dev",
       "--workspace",
@@ -42,7 +41,7 @@ const commands = [
       webHost,
       "--port",
       webPort
-    ],
+    ]),
     env: {
       ...process.env,
       ARR_SAC_API_ORIGIN: apiOrigin

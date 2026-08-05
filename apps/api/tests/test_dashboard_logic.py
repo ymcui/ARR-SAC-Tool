@@ -140,7 +140,13 @@ def test_commitment_stage_venue_level_area_chair_reader_is_in_scope() -> None:
                         "invitations": [
                             "aclweb.org/ACL/2026/Conference/Commitment42/-/Meta_Review"
                         ],
-                        "content": {"recommendation": {"value": "Accept"}},
+                        "content": {
+                            "recommendation": {"value": "Possible Findings"},
+                            "confidence": {
+                                "value": "3: Moderate confidence: I understand the main contributions."
+                            },
+                            "presentation_form": {"value": "Poster"},
+                        },
                         "signatures": [
                             "aclweb.org/ACL/2026/Conference/Commitment42/Area_Chair_1"
                         ],
@@ -160,6 +166,59 @@ def test_commitment_stage_venue_level_area_chair_reader_is_in_scope() -> None:
     assert response.papers[0].resubmission is True
     assert response.papers[0].preprint is True
     assert response.papers[0].recommendationPosted is True
+    assert response.papers[0].recommendation == "Possible Findings"
+    assert response.papers[0].recommendationConfidence == 3.0
+    assert response.papers[0].presentationForm == "Poster"
+
+
+def test_commitment_recommendation_uses_latest_post_and_venue_field_aliases() -> None:
+    snapshot = {
+        "viewer": {"id": "~Test_SAC1", "fullname": "Test SAC"},
+        "submission_name": "Commitment",
+        "my_sac_groups": ["venue/Area_Chairs"],
+        "submissions": [
+            {
+                "number": 7,
+                "id": "arr-paper-7",
+                "readers": ["venue/Area_Chairs"],
+                "content": {"venue": {"value": "ARR"}},
+                "replies": [],
+                "commitment_replies": [
+                    {
+                        "invitations": ["venue/Commitment7/-/Meta_Review"],
+                        "content": {
+                            "recommendation": {"value": "Accept"},
+                            "confidence": {"value": "2: Low confidence"},
+                            "presentation_form": {"value": "Poster"},
+                        },
+                        "tmdate": 0,
+                        "mdate": 0,
+                        "tcdate": 100,
+                    },
+                    {
+                        "invitations": ["venue/Commitment7/-/Recommendation"],
+                        "content": {
+                            "Recommendation": {"value": "Findings"},
+                            "Recommendation Confidence": {"value": "4: High confidence"},
+                            "Presentation Form": {"value": "Either"},
+                        },
+                        "tmdate": 0,
+                        "mdate": 0,
+                        "tcdate": 200,
+                    },
+                ],
+                "area_chairs": ["~Area_Chair1"],
+                "reviewers": [],
+            }
+        ],
+    }
+
+    response = build_dashboard_response(snapshot, "venue")
+
+    assert response.papers[0].recommendationPosted is True
+    assert response.papers[0].recommendation == "Findings"
+    assert response.papers[0].recommendationConfidence == 4.0
+    assert response.papers[0].presentationForm == "Either"
 
 
 def test_assignment_group_scope_keeps_public_readable_arr_submission() -> None:

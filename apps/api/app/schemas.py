@@ -35,6 +35,13 @@ class ScoreSummary(BaseModel):
     values: List[float] = Field(default_factory=list)
 
 
+class PaperAccessIssue(BaseModel):
+    paperNumber: int
+    reason: str
+    commitmentUrl: str
+    forumUrl: str = ""
+
+
 class PaperRecord(BaseModel):
     paperNumber: int
     paperId: str
@@ -51,6 +58,9 @@ class PaperRecord(BaseModel):
     hasConfidential: bool = False
     issueReport: bool = False
     recommendationPosted: bool = False
+    recommendation: str = ""
+    recommendationConfidence: Optional[float] = None
+    presentationForm: str = ""
     reviewerConfidence: ScoreSummary = Field(default_factory=ScoreSummary)
     soundnessScore: ScoreSummary = Field(default_factory=ScoreSummary)
     excitementScore: ScoreSummary = Field(default_factory=ScoreSummary)
@@ -173,6 +183,7 @@ class DashboardResponse(BaseModel):
     comments: List[CommentGroup] = Field(default_factory=list)
     alerts: List[AlertGroup] = Field(default_factory=list)
     analytics: AnalyticsInfo = Field(default_factory=AnalyticsInfo)
+    paperAccessIssues: List[PaperAccessIssue] = Field(default_factory=list)
 
 
 if hasattr(CommentRecord, "model_rebuild"):

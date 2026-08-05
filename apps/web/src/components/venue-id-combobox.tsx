@@ -23,7 +23,7 @@ export function VenueIdCombobox({
   listboxId,
   name,
   onChange,
-  placeholder = "aclweb.org/ACL/ARR/2026/May",
+  placeholder = "EMNLP/2026/Conference",
   recentVenueIds = [],
   required = false,
   value

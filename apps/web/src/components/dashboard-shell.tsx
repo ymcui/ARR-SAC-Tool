@@ -10,6 +10,8 @@ import { EmptyStateIcon } from "@/components/empty-state-icon";
 import { LoginPanel } from "@/components/login-panel";
 import { formatLoadPhase, LoadProgressPanel } from "@/components/load-progress-panel";
 import { PapersPanel } from "@/components/papers-panel";
+import { PaperAccessWarning } from "@/components/paper-access-warning";
+import { RecommendationPanel } from "@/components/recommendation-panel";
 import { Toolbar } from "@/components/toolbar";
 import type { DashboardLoadProgress, DashboardResponse, TabKey, VenueStage, ViewerInfo } from "@/lib/types";
 import { GITHUB_REPOSITORY_URL, LOCAL_APP_VERSION } from "@/lib/version";
@@ -30,7 +32,7 @@ const AnalyticsPanel = dynamic(() => import("@/components/analytics-panel"), {
 const VIEWER_STORAGE_KEY = "arr-sac-dashboard.viewer";
 const VENUE_STORAGE_KEY = "arr-sac-dashboard.venue";
 const RECENT_VENUES_STORAGE_KEY = "arr-sac-dashboard.recent-venues";
-const DEFAULT_VENUE_ID = "aclweb.org/ACL/ARR/2026/May";
+const DEFAULT_VENUE_ID = "EMNLP/2026/Conference";
 const ARR_STAGE_PREFIX = "aclweb.org/ACL/ARR";
 const MAX_RECENT_VENUES = 8;
 const DASHBOARD_RECOVERY_TIMEOUT_MS = 120000;
@@ -56,7 +58,12 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "comments", label: "Comments" },
   { key: "analytics", label: "Analytics" }
 ];
-const COMMITMENT_TABS = TABS.filter((tab) => tab.key !== "ac" && tab.key !== "alerts");
+const COMMITMENT_TABS: Array<{ key: TabKey; label: string }> = [
+  { key: "papers", label: "Papers" },
+  { key: "recommendation", label: "Recommendation" },
+  { key: "comments", label: "Comments" },
+  { key: "analytics", label: "Analytics" }
+];
 
 async function settleWithTimeout<T>(
   operation: Promise<T>,
@@ -524,11 +531,10 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
     setDashboard(payload);
     setViewer(payload.viewer);
     setVenueId(trimmedVenueId);
-    setActiveTab((current) =>
-      payload.venue.stage === "Commitment Stage" && (current === "ac" || current === "alerts")
-        ? "papers"
-        : current
-    );
+    setActiveTab((current) => {
+      const nextTabs = payload.venue.stage === "Commitment Stage" ? COMMITMENT_TABS : TABS;
+      return nextTabs.some((tab) => tab.key === current) ? current : "papers";
+    });
     setLoadProgress({
       venueId: trimmedVenueId,
       phase: "ready",
@@ -1042,6 +1048,7 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
 
           {viewer && loadedDashboard ? (
             <>
+              <PaperAccessWarning issues={loadedDashboard.paperAccessIssues ?? []} />
               <div className="panel-stack">
                 {selectedTab === "papers" ? (
                   <PapersPanel
@@ -1052,6 +1059,12 @@ export function DashboardShell({ configuredApiOrigin }: { configuredApiOrigin?: 
                     totalPapers={loadedDashboard.summary.totalPapers}
                     venueStage={loadedDashboard.venue.stage}
                     withdrawnPapers={loadedDashboard.withdrawnPapers ?? []}
+                  />
+                ) : null}
+                {selectedTab === "recommendation" && loadedDashboard.venue.stage === "Commitment Stage" ? (
+                  <RecommendationPanel
+                    papers={loadedDashboard.papers}
+                    totalPapers={loadedDashboard.summary.totalPapers}
                   />
                 ) : null}
                 {selectedTab === "ac" ? (

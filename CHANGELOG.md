@@ -2,6 +2,24 @@
 
 All notable user-facing changes are documented here.
 
+## [2.11.0] - 2026-08-06
+
+### Added
+
+- Added a dedicated commitment-stage Recommendation page showing each paper's raw SAC recommendation, confidence, and presentation form.
+- Added paper-specific warnings and direct OpenReview links when commitment assignments reference invalid or inaccessible papers.
+- Added Linux, macOS, and Windows CI coverage for the root development and production launch scripts.
+
+### Changed
+
+- Kept the commitment Papers page focused on review progress by removing its recommendation column and counter and moving Overall and Meta to the final columns.
+- Defaulted new sessions to the EMNLP 2026 Conference venue.
+
+### Fixed
+
+- Loaded all accessible commitment papers when another assigned paper is unavailable instead of failing the entire dashboard.
+- Made npm child-process launching portable across POSIX and Windows environments.
+
 ## [2.10.0] - 2026-08-05
 
 ### Added

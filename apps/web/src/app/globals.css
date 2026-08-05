@@ -1521,6 +1521,45 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+.recommendation-table {
+  min-width: 1040px;
+}
+
+.recommendation-paper-link {
+  color: var(--accent-strong);
+  font-size: 1rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.recommendation-paper-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.recommendation-value {
+  display: block;
+  min-width: 12rem;
+  max-width: 28rem;
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.presentation-form-value {
+  display: block;
+  min-width: 8rem;
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.recommendation-value.empty,
+.presentation-form-value.empty {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .withdrawn-papers-panel .section-header {
   align-items: start;
 }
@@ -2412,6 +2451,91 @@ select {
 
 .error-banner.compact {
   margin: 0;
+}
+
+.paper-access-warning {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid rgba(177, 111, 19, 0.26);
+  border-radius: 1.35rem;
+  background: rgba(255, 246, 225, 0.96);
+  box-shadow: 0 12px 28px rgba(120, 79, 17, 0.08);
+  color: #69450f;
+}
+
+.paper-access-warning-copy {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.paper-access-warning-copy h2,
+.paper-access-warning-copy p {
+  margin: 0;
+}
+
+.paper-access-warning-copy h2 {
+  color: #5d3b09;
+  font-size: 1.05rem;
+}
+
+.paper-access-warning-copy > p:last-child {
+  color: #76521d;
+  line-height: 1.55;
+}
+
+.paper-access-warning-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.paper-access-warning-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.78rem 0.9rem;
+  border: 1px solid rgba(177, 111, 19, 0.18);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.paper-access-warning-item > div:first-child {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.paper-access-warning-item span {
+  color: #76521d;
+  font-size: 0.86rem;
+}
+
+.paper-access-warning-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.paper-access-warning-actions a {
+  color: #71470a;
+  font-size: 0.84rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .paper-access-warning-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .paper-access-warning-actions {
+    justify-content: flex-start;
+  }
 }
 
 @keyframes rise-in {

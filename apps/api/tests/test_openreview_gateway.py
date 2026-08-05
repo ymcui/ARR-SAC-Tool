@@ -914,7 +914,11 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
                                 invitations=[
                                     "aclweb.org/ACL/2026/Conference/Commitment7/-/Meta_Review"
                                 ],
-                                content={"recommendation": {"value": "Accept"}},
+                                content={
+                                    "recommendation": {"value": "Possible Findings"},
+                                    "confidence": {"value": "3: Moderate confidence"},
+                                    "presentation_form": {"value": "Poster"},
+                                },
                                 tcdate=1712188800000,
                             )
                         ]
@@ -975,6 +979,9 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
     assert submission["content"]["Previous URL"]["value"] == "https://openreview.net/forum?id=previous-arr-paper"
     assert submission["replies"][0]["id"] == "review-1"
     assert submission["commitment_replies"][0]["id"] == "commitment-meta-review-1"
+    assert submission["commitment_replies"][0]["content"]["recommendation"]["value"] == "Possible Findings"
+    assert submission["commitment_replies"][0]["content"]["confidence"]["value"] == "3: Moderate confidence"
+    assert submission["commitment_replies"][0]["content"]["presentation_form"]["value"] == "Poster"
 
 
 def test_gateway_loads_forty_direct_commitments_without_venue_wide_assignment_queries() -> None:
@@ -1496,7 +1503,7 @@ def test_gateway_skips_commitment_entries_visible_through_authors_group() -> Non
     assert snapshot["submissions"] == []
 
 
-def test_gateway_fails_closed_when_scoped_commitment_entry_has_invalid_link() -> None:
+def test_gateway_reports_scoped_commitment_entry_with_invalid_link() -> None:
     class MissingLinkClient:
         user = {"profile": {"id": "~Test_SAC1", "fullname": "Test SAC"}}
 
@@ -1518,8 +1525,105 @@ def test_gateway_fails_closed_when_scoped_commitment_entry_has_invalid_link() ->
                 )
             ]
 
-    with pytest.raises(DashboardFetchError, match="invalid paper links=1"):
-        OpenReviewGateway().fetch_dashboard_snapshot(
-            MissingLinkClient(),
-            "aclweb.org/ACL/2026/Conference",
-        )
+    snapshot = OpenReviewGateway().fetch_dashboard_snapshot(
+        MissingLinkClient(),
+        "aclweb.org/ACL/2026/Conference",
+    )
+
+    assert snapshot["submissions"] == []
+    assert snapshot["paper_access_issues"] == [
+        {
+            "paperNumber": 7,
+            "reason": "invalid_paper_link",
+            "commitmentUrl": "https://openreview.net/forum?id=commitment-7",
+            "forumUrl": "",
+        }
+    ]
+
+
+def test_gateway_keeps_accessible_commitments_and_reports_unavailable_linked_forum() -> None:
+    class PartialAccessClient(CommitmentBatchClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.user = {"profile": {"id": "~Test_SAC1", "fullname": "Test SAC"}}
+
+        def get_group(self, group_id: str):
+            if group_id == "aclweb.org/ACL/2026/Conference":
+                return SimpleNamespace(content={"submission_name": {"value": "Commitment"}})
+            raise AssertionError(f"Unexpected group lookup: {group_id}")
+
+        def get_all_groups(self, prefix: str, members: str | None = None):
+            assert prefix == "aclweb.org/ACL/2026/Conference"
+            if members is None:
+                return []
+            assert members == "~Test_SAC1"
+            return [SimpleNamespace(id=f"{prefix}/Area_Chairs")]
+
+        def get_all_notes(self, invitation: str, details: str | None = None):
+            assert invitation == "aclweb.org/ACL/2026/Conference/-/Commitment"
+            assert details is None
+            return [
+                SimpleNamespace(
+                    number=7,
+                    id="commitment-7",
+                    readers=["aclweb.org/ACL/2026/Conference/Area_Chairs"],
+                    content={
+                        "paper_link": {"value": "https://openreview.net/forum?id=arr-paper-42"},
+                        "area_chair": {"value": "~Area_Chair1"},
+                    },
+                ),
+                SimpleNamespace(
+                    number=8,
+                    id="commitment-8",
+                    readers=["aclweb.org/ACL/2026/Conference/Area_Chairs"],
+                    content={
+                        "paper_link": {"value": "https://openreview.net/forum?id=arr-paper-99"},
+                        "area_chair": {"value": "~Area_Chair2"},
+                    },
+                ),
+            ]
+
+        def get(self, url: str, params: dict, headers: dict):
+            assert url == self.notes_url
+            assert headers == self.headers
+            self.batch_requests.append(params)
+            return NoteBatchResponse(
+                [
+                    self._note_for_batch(note_id)
+                    for note_id in params.get("ids", [])
+                    if note_id != "arr-paper-99"
+                ]
+            )
+
+        def _note_for_batch(self, note_id: str) -> SimpleNamespace:
+            assert note_id == "arr-paper-42"
+            return SimpleNamespace(
+                number=42,
+                id="arr-paper-42",
+                readers=["everyone"],
+                content={
+                    "venue": {"value": "ACL ARR 2026 March"},
+                    "title": {"value": "Accessible committed paper"},
+                },
+                details={"replies": []},
+            )
+
+    client = PartialAccessClient()
+
+    snapshot = OpenReviewGateway().fetch_dashboard_snapshot(
+        client,
+        "aclweb.org/ACL/2026/Conference",
+    )
+    response = build_dashboard_response(snapshot, "aclweb.org/ACL/2026/Conference")
+
+    assert client.batch_requests == [
+        {"ids": ["arr-paper-42", "arr-paper-99"], "limit": 2}
+    ]
+    assert [paper.paperNumber for paper in response.papers] == [7]
+    assert response.papers[0].paperTitle == "Accessible committed paper"
+    assert len(response.paperAccessIssues) == 1
+    issue = response.paperAccessIssues[0]
+    assert issue.paperNumber == 8
+    assert issue.reason == "unavailable_linked_forum"
+    assert issue.commitmentUrl == "https://openreview.net/forum?id=commitment-8"
+    assert issue.forumUrl == "https://openreview.net/forum?id=arr-paper-99"

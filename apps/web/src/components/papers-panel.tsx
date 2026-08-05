@@ -29,7 +29,6 @@ type SortColumn =
   | "preprint"
   | "hasConfidential"
   | "issueReport"
-  | "recommendationPosted"
   | "reviewerConfidence"
   | "soundnessScore"
   | "excitementScore"
@@ -63,12 +62,11 @@ const COMMITMENT_SORT_DEFINITIONS: SortDefinition[] = [
   { column: "preprint", label: "Pre-print", defaultDirection: "desc" },
   { column: "hasConfidential", label: "Has confidential", defaultDirection: "desc" },
   { column: "issueReport", label: "Issue report", defaultDirection: "desc" },
-  { column: "metaReviewScore", label: "Meta", defaultDirection: "desc" },
-  { column: "overallAssessment", label: "Overall", defaultDirection: "desc" },
   { column: "soundnessScore", label: "Soundness", defaultDirection: "desc" },
   { column: "excitementScore", label: "Excitement", defaultDirection: "desc" },
   { column: "reviewerConfidence", label: "Confidence", defaultDirection: "desc" },
-  { column: "recommendationPosted", label: "Recommendation", defaultDirection: "desc" }
+  { column: "overallAssessment", label: "Overall", defaultDirection: "desc" },
+  { column: "metaReviewScore", label: "Meta", defaultDirection: "desc" }
 ];
 
 function paperColumnClass(column: SortColumn, emphasizePriority = false) {
@@ -348,14 +346,6 @@ export function PapersPanel({
                 compareBoolean(left.issueReport, right.issueReport, sortDirection) ||
                 left.paperNumber - right.paperNumber
               );
-            case "recommendationPosted":
-              return (
-                compareBoolean(
-                  Boolean(left.recommendationPosted),
-                  Boolean(right.recommendationPosted),
-                  sortDirection
-                ) || left.paperNumber - right.paperNumber
-              );
             case "reviewerConfidence":
               return (
                 compareNullableNumber(
@@ -397,14 +387,13 @@ export function PapersPanel({
     [activeSortColumn, deferredSearch, papers, sortDirection]
   );
 
-  const { readyForRebuttalCount, missingReviewsCount, recommendationPostedCount } = useMemo(
+  const { readyForRebuttalCount, missingReviewsCount } = useMemo(
     () => ({
       readyForRebuttalCount: filteredPapers.filter((paper) => paper.readyForRebuttal).length,
       missingReviewsCount: filteredPapers.reduce(
         (total, paper) => total + Math.max(0, 3 - paper.completedReviews),
         0
-      ),
-      recommendationPostedCount: filteredPapers.filter((paper) => paper.recommendationPosted).length
+      )
     }),
     [filteredPapers]
   );
@@ -428,22 +417,12 @@ export function PapersPanel({
         </div>
         <div className="papers-header-controls">
           {isCommitmentStage ? (
-            <>
-              <div className="papers-summary-pills" aria-label="Recommendation summary">
-                <div className="papers-summary-pill">
-                  <span className="papers-summary-pill-label">Recommendation</span>
-                  <span className="papers-summary-pill-value">
-                    {recommendationPostedCount}/{filteredPapers.length}
-                  </span>
-                </div>
-              </div>
-              <ExportButton
-                exportError={exportError}
-                isExporting={isExporting}
-                onExport={onExport}
-                papersCount={papers.length}
-              />
-            </>
+            <ExportButton
+              exportError={exportError}
+              isExporting={isExporting}
+              onExport={onExport}
+              papersCount={papers.length}
+            />
           ) : (
             <div className="papers-summary-pills" aria-label="Papers summary">
               <div className="papers-summary-pill">
@@ -565,15 +544,6 @@ export function PapersPanel({
                         <td className={paperColumnClass("issueReport")} data-column="issueReport">
                           <TableBooleanIcon label="Issue report" value={paper.issueReport} />
                         </td>
-                        <td className={paperColumnClass("metaReviewScore", true)} data-column="metaReviewScore">
-                          {metaReviewCell(paper.metaReviewScore)}
-                        </td>
-                        <td
-                          className={paperColumnClass("overallAssessment", true)}
-                          data-column="overallAssessment"
-                        >
-                          {formatScore(paper.overallAssessment.average)}
-                        </td>
                         <td className={paperColumnClass("soundnessScore")} data-column="soundnessScore">
                           {formatScore(paper.soundnessScore.average)}
                         </td>
@@ -584,13 +554,13 @@ export function PapersPanel({
                           {formatScore(paper.reviewerConfidence.average)}
                         </td>
                         <td
-                          className={paperColumnClass("recommendationPosted")}
-                          data-column="recommendationPosted"
+                          className={paperColumnClass("overallAssessment", true)}
+                          data-column="overallAssessment"
                         >
-                          <TableBooleanIcon
-                            label="Recommendation"
-                            value={Boolean(paper.recommendationPosted)}
-                          />
+                          {formatScore(paper.overallAssessment.average)}
+                        </td>
+                        <td className={paperColumnClass("metaReviewScore", true)} data-column="metaReviewScore">
+                          {metaReviewCell(paper.metaReviewScore)}
                         </td>
                       </>
                     ) : (

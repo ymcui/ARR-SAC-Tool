@@ -1,6 +1,6 @@
 {
   "name": "arr-sac-dashboard",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "private": true,
   "scripts": {
     "predev": "node scripts/ensure-api-env.mjs",
@@ -13,7 +13,7 @@
     "build": "npm run build --workspace @arr-sac/web",
     "test": "npm run test:scripts && npm run test:api && npm run test:web",
     "test:api": "node scripts/ensure-api-env.mjs && node scripts/run-api-python.mjs -m pytest apps/api/tests",
-    "test:scripts": "node --test scripts/process-tree.test.mjs",
+    "test:scripts": "node --test scripts/process-tree.test.mjs scripts/npm-invocation.test.mjs",
     "test:web": "npm run test --workspace @arr-sac/web -- --run"
   },
   "devDependencies": {

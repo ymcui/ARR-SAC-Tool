@@ -141,6 +141,21 @@ const commitmentDashboardFixture: DashboardResponse = {
     submissionName: "Commitment",
     lastSyncedAt: "2026-04-23T12:00:00.000Z"
   },
+  papers: dashboardFixture.papers.map((paper) => ({
+    ...paper,
+    recommendationPosted: true,
+    recommendation: "Possible Findings",
+    recommendationConfidence: 3,
+    presentationForm: "Poster"
+  })),
+  paperAccessIssues: [
+    {
+      paperNumber: 2922,
+      reason: "unavailable_linked_forum",
+      commitmentUrl: "https://openreview.net/forum?id=commitment-2922",
+      forumUrl: "https://openreview.net/forum?id=linked-paper-2922"
+    }
+  ],
   areaChairs: []
 };
 
@@ -259,7 +274,7 @@ describe("DashboardShell", () => {
     if (savedVenue) {
       window.sessionStorage.setItem("arr-sac-dashboard.venue", savedVenue);
     }
-    const expectedVenue = savedVenue ?? "aclweb.org/ACL/ARR/2026/May";
+    const expectedVenue = savedVenue ?? "EMNLP/2026/Conference";
     const expectedDashboard: DashboardResponse = {
       ...dashboardFixture,
       venue: {
@@ -313,8 +328,8 @@ describe("DashboardShell", () => {
     );
     expect(screen.getByText(`v${LOCAL_APP_VERSION}`)).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Sign in" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Venue ID")).toHaveValue("aclweb.org/ACL/ARR/2026/May");
-    expect(screen.getByText("ARR Stage")).toBeInTheDocument();
+    expect(screen.getByLabelText("Venue ID")).toHaveValue("EMNLP/2026/Conference");
+    expect(screen.getByText("Commitment Stage")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     const loadStatus = screen.getByRole("status");
     expect(loadStatus).toBeEmptyDOMElement();
@@ -351,7 +366,7 @@ describe("DashboardShell", () => {
     await waitFor(() => {
       expect(JSON.parse(window.localStorage.getItem("arr-sac-dashboard.recent-venues") || "[]")).toEqual([
         "aclweb.org/ACL/ARR/2026/March",
-        "aclweb.org/ACL/ARR/2026/May"
+        "EMNLP/2026/Conference"
       ]);
     });
     await user.click(accountTrigger);
@@ -1103,10 +1118,10 @@ describe("DashboardShell", () => {
     const user = userEvent.setup();
     const input = await openAccountMenu(user);
     await user.clear(input);
-    await user.type(input, "aclweb.org/ACL/2026/Conference");
+    await user.type(input, "aclweb.org/ACL/ARR/2026/March");
 
-    expect(screen.getByText("ARR Stage")).toBeInTheDocument();
-    expect(screen.queryByText("Commitment Stage")).not.toBeInTheDocument();
+    expect(screen.getByText("Commitment Stage")).toBeInTheDocument();
+    expect(screen.queryByText("ARR Stage")).not.toBeInTheDocument();
   });
 
   it("keeps loaded data while a venue draft remains unapplied", async () => {
@@ -1273,7 +1288,7 @@ describe("DashboardShell", () => {
     expect(apiRequestPath(appFetchCalls(fetchMock)[2][0])).toBe("/api/session/logout");
   });
 
-  it("omits the Area Chairs tab for commitment stage dashboards", async () => {
+  it("adds Recommendation after Papers and omits ARR-only tabs for commitment dashboards", async () => {
     const fetchMock = createFetchMock(
       createResponse(commitmentDashboardFixture.viewer),
       createResponse(commitmentDashboardFixture)
@@ -1287,9 +1302,31 @@ describe("DashboardShell", () => {
     await signInAndLoad(user, "aclweb.org/ACL/2026/Conference");
 
     expect(await screen.findByRole("tab", { name: "Papers" })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("tab").map((tab) => tab.textContent)
+    ).toEqual(["Papers", "Recommendation", "Comments", "Analytics"]);
     expect(screen.queryByRole("tab", { name: "Area Chairs" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Alerts" })).not.toBeInTheDocument();
     expect(screen.getByText("Commitment Stage")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "42" })).toBeInTheDocument();
+
+    const warning = screen.getByRole("alert");
+    expect(within(warning).getByRole("heading", { name: "1 assigned paper could not be loaded" })).toBeInTheDocument();
+    expect(within(warning).getByText("Paper 2922")).toBeInTheDocument();
+    expect(within(warning).getByRole("link", { name: "Open commitment" })).toHaveAttribute(
+      "href",
+      "https://openreview.net/forum?id=commitment-2922"
+    );
+    expect(within(warning).getByRole("link", { name: "Check linked paper" })).toHaveAttribute(
+      "href",
+      "https://openreview.net/forum?id=linked-paper-2922"
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Recommendation" }));
+
+    expect(screen.getByRole("table", { name: "SAC recommendations" })).toBeInTheDocument();
+    expect(screen.getByText("Possible Findings")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBe(warning);
   });
 
   it("shows an update notice when GitHub has a newer version", async () => {

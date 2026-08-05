@@ -25,6 +25,13 @@ export type ScoreSummary = {
   values: number[];
 };
 
+export type PaperAccessIssue = {
+  paperNumber: number;
+  reason: "invalid_paper_link" | "unavailable_linked_forum" | string;
+  commitmentUrl: string;
+  forumUrl: string;
+};
+
 export type PaperRecord = {
   paperNumber: number;
   paperId: string;
@@ -41,6 +48,9 @@ export type PaperRecord = {
   hasConfidential: boolean;
   issueReport: boolean;
   recommendationPosted?: boolean;
+  recommendation?: string;
+  recommendationConfidence?: number | null;
+  presentationForm?: string;
   reviewerConfidence: ScoreSummary;
   soundnessScore: ScoreSummary;
   excitementScore: ScoreSummary;
@@ -163,6 +173,7 @@ export type DashboardResponse = {
   comments: CommentGroup[];
   alerts: AlertGroup[];
   analytics: AnalyticsInfo;
+  paperAccessIssues?: PaperAccessIssue[];
 };
 
-export type TabKey = "papers" | "ac" | "alerts" | "comments" | "analytics";
+export type TabKey = "papers" | "recommendation" | "ac" | "alerts" | "comments" | "analytics";

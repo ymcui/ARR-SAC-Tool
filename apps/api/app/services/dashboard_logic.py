@@ -16,6 +16,7 @@ from app.schemas import (
     DashboardResponse,
     DistributionPoint,
     HistogramPoint,
+    PaperAccessIssue,
     PaperRecord,
     ScatterPoint,
     ScoreSummary,
@@ -58,6 +59,10 @@ def build_dashboard_response(
     submissions = snapshot.get("submissions", [])
     withdrawn_submissions = snapshot.get("withdrawn_submissions", [])
     area_chair_contacts = snapshot.get("area_chair_contacts", {})
+    paper_access_issues = [
+        _model_validate(PaperAccessIssue, issue)
+        for issue in snapshot.get("paper_access_issues", [])
+    ]
     should_collect_alerts = _venue_stage(venue_id) == "ARR Stage"
 
     papers: List[PaperRecord] = []
@@ -160,6 +165,7 @@ def build_dashboard_response(
         comments=comment_groups,
         alerts=alert_groups,
         analytics=analytics,
+        paperAccessIssues=paper_access_issues,
     )
     logger.warning(
         (
@@ -241,6 +247,12 @@ def _is_desk_rejected(submission: Dict[str, Any]) -> bool:
 def _build_paper_record(submission: Dict[str, Any], area_chair: str) -> PaperRecord:
     replies = submission.get("replies", []) or []
     commitment_replies = submission.get("commitment_replies", []) or []
+    commitment_recommendation = _latest_commitment_recommendation(commitment_replies)
+    commitment_content = (
+        commitment_recommendation.get("content", {})
+        if commitment_recommendation is not None
+        else {}
+    )
 
     completed_reviews = 0
     confidence_scores: List[float] = []
@@ -324,7 +336,34 @@ def _build_paper_record(submission: Dict[str, Any], area_chair: str) -> PaperRec
         ),
         hasConfidential=has_confidential,
         issueReport=has_issue_report,
-        recommendationPosted=any(_is_meta_review(reply) for reply in commitment_replies),
+        recommendationPosted=commitment_recommendation is not None,
+        recommendation=_first_content_text(
+            commitment_content,
+            ["recommendation", "Recommendation", "decision", "Decision"],
+        ),
+        recommendationConfidence=_first_number(
+            commitment_content,
+            [
+                "confidence",
+                "Confidence",
+                "recommendation_confidence",
+                "recommendation confidence",
+                "Recommendation Confidence",
+            ],
+        ),
+        presentationForm=_first_content_text(
+            commitment_content,
+            [
+                "presentation_form",
+                "Presentation Form",
+                "presentation form",
+                "presentation_format",
+                "Presentation Format",
+                "presentation format",
+                "presentation",
+                "Presentation",
+            ],
+        ),
         reviewerConfidence=_score_summary(confidence_scores),
         soundnessScore=_score_summary(soundness_scores),
         excitementScore=_score_summary(excitement_scores),
@@ -748,7 +787,7 @@ def _parse_number(value: Any) -> Optional[float]:
     if not text:
         return None
 
-    token = text.split()[0]
+    token = text.split()[0].rstrip(":")
     try:
         return float(token)
     except ValueError:
@@ -810,6 +849,58 @@ def _is_actual_review(reply: Dict[str, Any]) -> bool:
 
 def _is_meta_review(reply: Dict[str, Any]) -> bool:
     return any("/-/Meta_Review" in invitation for invitation in reply.get("invitations", []))
+
+
+def _is_commitment_recommendation(reply: Dict[str, Any]) -> bool:
+    if _is_meta_review(reply):
+        return True
+
+    content = reply.get("content", {})
+    normalized_keys = {
+        str(key).strip().lower().replace("_", " ")
+        for key in content
+    }
+    return bool(
+        normalized_keys
+        & {
+            "recommendation",
+            "recommendation confidence",
+            "presentation",
+            "presentation form",
+            "presentation format",
+        }
+    )
+
+
+def _reply_timestamp(reply: Dict[str, Any]) -> int:
+    for key in ["tmdate", "mdate", "tcdate", "cdate"]:
+        value = reply.get(key)
+        if value in (None, "", 0, "0"):
+            continue
+        try:
+            timestamp = int(value)
+        except (TypeError, ValueError):
+            continue
+        if timestamp > 0:
+            return timestamp
+    return 0
+
+
+def _latest_commitment_recommendation(
+    replies: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    candidates = [
+        (index, reply)
+        for index, reply in enumerate(replies)
+        if _is_commitment_recommendation(reply)
+    ]
+    if not candidates:
+        return None
+
+    return max(
+        candidates,
+        key=lambda item: (_reply_timestamp(item[1]), item[0]),
+    )[1]
 
 
 def _is_action_editor_checklist(reply: Dict[str, Any]) -> bool:

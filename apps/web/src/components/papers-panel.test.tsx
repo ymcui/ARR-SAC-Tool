@@ -281,15 +281,14 @@ describe("PapersPanel", () => {
       "Pre-print",
       "Has confidential",
       "Issue report",
-      "Meta",
-      "Overall",
       "Soundness",
       "Excitement",
       "Confidence",
-      "Recommendation",
+      "Overall",
+      "Meta"
     ]);
-    expect(screen.getAllByRole("img", { name: "Recommendation: Yes" })).toHaveLength(2);
-    expect(screen.getByRole("img", { name: "Recommendation: No" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /recommendation/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /recommendation:/i })).not.toBeInTheDocument();
     expect(screen.getAllByText("4.0").length).toBeGreaterThan(0);
     expect(screen.queryByText("4.0 (4.0 / 4.0 / 4.0)")).not.toBeInTheDocument();
   });
@@ -305,8 +304,7 @@ describe("PapersPanel", () => {
       "overallAssessment",
       "soundnessScore",
       "excitementScore",
-      "reviewerConfidence",
-      "recommendationPosted"
+      "reviewerConfidence"
     ];
 
     for (const column of centeredColumns) {
@@ -364,7 +362,7 @@ describe("PapersPanel", () => {
     expect(within(summary).getByText("0")).toBeInTheDocument();
   });
 
-  it("moves the commitment export action into the paper header", async () => {
+  it("shows the commitment export action without a recommendation counter", async () => {
     const onExport = vi.fn();
     renderPapersPanel([], "Commitment Stage", onExport);
     const user = userEvent.setup();
@@ -372,13 +370,10 @@ describe("PapersPanel", () => {
     expect(screen.queryByText("Export Papers")).not.toBeInTheDocument();
     expect(screen.queryByText("Ready for rebuttal")).not.toBeInTheDocument();
     expect(screen.queryByText("Missing reviews")).not.toBeInTheDocument();
-    const summary = screen.getByLabelText("Recommendation summary");
-    expect(within(summary).getByText("Recommendation")).toBeInTheDocument();
-    expect(within(summary).getByText("2/3")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Recommendation summary")).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/search papers/i), "107");
 
-    expect(within(summary).getByText("0/1")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /export xlsx/i }));
 
     expect(onExport).toHaveBeenCalledTimes(1);
