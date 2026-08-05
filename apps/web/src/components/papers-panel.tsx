@@ -29,6 +29,7 @@ type SortColumn =
   | "preprint"
   | "hasConfidential"
   | "issueReport"
+  | "recommendationPosted"
   | "reviewerConfidence"
   | "soundnessScore"
   | "excitementScore"
@@ -66,8 +67,20 @@ const COMMITMENT_SORT_DEFINITIONS: SortDefinition[] = [
   { column: "overallAssessment", label: "Overall", defaultDirection: "desc" },
   { column: "soundnessScore", label: "Soundness", defaultDirection: "desc" },
   { column: "excitementScore", label: "Excitement", defaultDirection: "desc" },
-  { column: "reviewerConfidence", label: "Confidence", defaultDirection: "desc" }
+  { column: "reviewerConfidence", label: "Confidence", defaultDirection: "desc" },
+  { column: "recommendationPosted", label: "Recommendation", defaultDirection: "desc" }
 ];
+
+function paperColumnClass(column: SortColumn, emphasizePriority = false) {
+  const isTextColumn = column === "paperNumber" || column === "areaChair" || column === "paperType";
+  const isPriorityColumn =
+    emphasizePriority && (column === "metaReviewScore" || column === "overallAssessment");
+
+  return joinClasses(
+    isTextColumn ? "papers-table-column-text" : "papers-table-column-center",
+    isPriorityColumn && "papers-table-column-priority"
+  );
+}
 
 function scoreBlock(
   label: string,
@@ -335,6 +348,14 @@ export function PapersPanel({
                 compareBoolean(left.issueReport, right.issueReport, sortDirection) ||
                 left.paperNumber - right.paperNumber
               );
+            case "recommendationPosted":
+              return (
+                compareBoolean(
+                  Boolean(left.recommendationPosted),
+                  Boolean(right.recommendationPosted),
+                  sortDirection
+                ) || left.paperNumber - right.paperNumber
+              );
             case "reviewerConfidence":
               return (
                 compareNullableNumber(
@@ -376,13 +397,14 @@ export function PapersPanel({
     [activeSortColumn, deferredSearch, papers, sortDirection]
   );
 
-  const { readyForRebuttalCount, missingReviewsCount } = useMemo(
+  const { readyForRebuttalCount, missingReviewsCount, recommendationPostedCount } = useMemo(
     () => ({
       readyForRebuttalCount: filteredPapers.filter((paper) => paper.readyForRebuttal).length,
       missingReviewsCount: filteredPapers.reduce(
         (total, paper) => total + Math.max(0, 3 - paper.completedReviews),
         0
-      )
+      ),
+      recommendationPostedCount: filteredPapers.filter((paper) => paper.recommendationPosted).length
     }),
     [filteredPapers]
   );
@@ -406,12 +428,22 @@ export function PapersPanel({
         </div>
         <div className="papers-header-controls">
           {isCommitmentStage ? (
-            <ExportButton
-              exportError={exportError}
-              isExporting={isExporting}
-              onExport={onExport}
-              papersCount={papers.length}
-            />
+            <>
+              <div className="papers-summary-pills" aria-label="Recommendation summary">
+                <div className="papers-summary-pill">
+                  <span className="papers-summary-pill-label">Recommendation</span>
+                  <span className="papers-summary-pill-value">
+                    {recommendationPostedCount}/{filteredPapers.length}
+                  </span>
+                </div>
+              </div>
+              <ExportButton
+                exportError={exportError}
+                isExporting={isExporting}
+                onExport={onExport}
+                papersCount={papers.length}
+              />
+            </>
           ) : (
             <div className="papers-summary-pills" aria-label="Papers summary">
               <div className="papers-summary-pill">
@@ -448,6 +480,8 @@ export function PapersPanel({
                 return (
                   <th
                     aria-sort={headerAriaSort(definition.column, activeSortColumn, sortDirection)}
+                    className={paperColumnClass(definition.column)}
+                    data-column={definition.column}
                     key={definition.column}
                     scope="col"
                   >
@@ -501,7 +535,7 @@ export function PapersPanel({
                     }}
                     tabIndex={0}
                   >
-                    <td>
+                    <td className={paperColumnClass("paperNumber")} data-column="paperNumber">
                       <button
                         aria-expanded={expanded}
                         className="row-toggle"
@@ -516,41 +550,81 @@ export function PapersPanel({
                     </td>
                     {isCommitmentStage ? (
                       <>
-                        <td>{paper.paperType || "Unspecified"}</td>
-                        <td>
+                        <td className={paperColumnClass("paperType")} data-column="paperType">
+                          {paper.paperType || "Unspecified"}
+                        </td>
+                        <td className={paperColumnClass("resubmission")} data-column="resubmission">
                           <TableBooleanIcon label="Resubmission" value={paper.resubmission} />
                         </td>
-                        <td>
+                        <td className={paperColumnClass("preprint")} data-column="preprint">
                           <TableBooleanIcon label="Pre-print" value={paper.preprint} />
                         </td>
-                        <td>
+                        <td className={paperColumnClass("hasConfidential")} data-column="hasConfidential">
                           <TableBooleanIcon label="Has confidential" value={paper.hasConfidential} />
                         </td>
-                        <td>
+                        <td className={paperColumnClass("issueReport")} data-column="issueReport">
                           <TableBooleanIcon label="Issue report" value={paper.issueReport} />
                         </td>
-                        <td>{metaReviewCell(paper.metaReviewScore)}</td>
-                        <td>{formatScore(paper.overallAssessment.average)}</td>
-                        <td>{formatScore(paper.soundnessScore.average)}</td>
-                        <td>{formatScore(paper.excitementScore.average)}</td>
-                        <td>{formatScore(paper.reviewerConfidence.average)}</td>
+                        <td className={paperColumnClass("metaReviewScore", true)} data-column="metaReviewScore">
+                          {metaReviewCell(paper.metaReviewScore)}
+                        </td>
+                        <td
+                          className={paperColumnClass("overallAssessment", true)}
+                          data-column="overallAssessment"
+                        >
+                          {formatScore(paper.overallAssessment.average)}
+                        </td>
+                        <td className={paperColumnClass("soundnessScore")} data-column="soundnessScore">
+                          {formatScore(paper.soundnessScore.average)}
+                        </td>
+                        <td className={paperColumnClass("excitementScore")} data-column="excitementScore">
+                          {formatScore(paper.excitementScore.average)}
+                        </td>
+                        <td className={paperColumnClass("reviewerConfidence")} data-column="reviewerConfidence">
+                          {formatScore(paper.reviewerConfidence.average)}
+                        </td>
+                        <td
+                          className={paperColumnClass("recommendationPosted")}
+                          data-column="recommendationPosted"
+                        >
+                          <TableBooleanIcon
+                            label="Recommendation"
+                            value={Boolean(paper.recommendationPosted)}
+                          />
+                        </td>
                       </>
                     ) : (
                       <>
-                        <td>{paper.areaChair}</td>
-                        <td>{paper.paperType || "Unspecified"}</td>
-                        <td>{formatCountPair(paper.completedReviews, paper.expectedReviews)}</td>
-                        <td>
+                        <td className={paperColumnClass("areaChair")} data-column="areaChair">
+                          {paper.areaChair}
+                        </td>
+                        <td className={paperColumnClass("paperType")} data-column="paperType">
+                          {paper.paperType || "Unspecified"}
+                        </td>
+                        <td className={paperColumnClass("reviews")} data-column="reviews">
+                          {formatCountPair(paper.completedReviews, paper.expectedReviews)}
+                        </td>
+                        <td className={paperColumnClass("readyForRebuttal")} data-column="readyForRebuttal">
                           <TableBooleanIcon label="Ready" value={paper.readyForRebuttal} />
                         </td>
-                        <td>
+                        <td
+                          className={paperColumnClass("authorResponseReady")}
+                          data-column="authorResponseReady"
+                        >
                           <TableBooleanIcon label="Responses" value={paper.authorResponseReady} />
                         </td>
-                        <td>
+                        <td className={paperColumnClass("acChecklistReady")} data-column="acChecklistReady">
                           <TableBooleanIcon label="Checklist" value={paper.acChecklistReady} />
                         </td>
-                        <td>{metaReviewCell(paper.metaReviewScore)}</td>
-                        <td>{formatScoreSummary(paper.overallAssessment)}</td>
+                        <td className={paperColumnClass("metaReviewScore", true)} data-column="metaReviewScore">
+                          {metaReviewCell(paper.metaReviewScore)}
+                        </td>
+                        <td
+                          className={paperColumnClass("overallAssessment", true)}
+                          data-column="overallAssessment"
+                        >
+                          {formatScoreSummary(paper.overallAssessment)}
+                        </td>
                       </>
                     )}
                   </tr>

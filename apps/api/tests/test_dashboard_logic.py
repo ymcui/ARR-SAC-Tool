@@ -135,6 +135,17 @@ def test_commitment_stage_venue_level_area_chair_reader_is_in_scope() -> None:
                     "preprint": {"value": "Yes"},
                 },
                 "replies": [],
+                "commitment_replies": [
+                    {
+                        "invitations": [
+                            "aclweb.org/ACL/2026/Conference/Commitment42/-/Meta_Review"
+                        ],
+                        "content": {"recommendation": {"value": "Accept"}},
+                        "signatures": [
+                            "aclweb.org/ACL/2026/Conference/Commitment42/Area_Chair_1"
+                        ],
+                    }
+                ],
                 "area_chairs": ["~Area_Chair1"],
                 "reviewers": [],
             }
@@ -148,6 +159,7 @@ def test_commitment_stage_venue_level_area_chair_reader_is_in_scope() -> None:
     assert response.papers[0].forumUrl == "https://openreview.net/forum?id=commitment-42"
     assert response.papers[0].resubmission is True
     assert response.papers[0].preprint is True
+    assert response.papers[0].recommendationPosted is True
 
 
 def test_assignment_group_scope_keeps_public_readable_arr_submission() -> None:
@@ -233,6 +245,7 @@ def test_meta_review_fallback_fields_are_supported() -> None:
     assert response.papers[0].metaReviewScore == 3.5
     assert response.papers[0].metaReviewConfidence.average == 4.0
     assert response.papers[0].metaReviewConfidence.values == [4.0]
+    assert response.papers[0].recommendationPosted is False
 
 
 def test_empty_comments_produce_empty_comment_groups() -> None:

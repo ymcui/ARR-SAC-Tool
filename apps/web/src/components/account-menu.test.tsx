@@ -30,6 +30,7 @@ describe("AccountMenu", () => {
     await user.click(trigger);
     const input = screen.getByLabelText("Venue ID");
     expect(input).toHaveFocus();
+    expect(screen.getByRole("button", { name: "How to find the venue ID" })).toBeInTheDocument();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load / Refresh" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Logout" })).toBeInTheDocument();

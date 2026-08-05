@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 
 import { VenueIdCombobox } from "@/components/venue-id-combobox";
+import { VenueIdHelp } from "@/components/venue-id-help";
 
 type LoginPanelProps = {
   isBusy: boolean;
@@ -100,9 +101,12 @@ export function LoginPanel({
           </label>
 
           <div className="field">
-            <label htmlFor="login-venue-id">
-              <span>Venue ID</span>
-            </label>
+            <div className="field-label-row">
+              <label htmlFor="login-venue-id">
+                <span>Venue ID</span>
+              </label>
+              <VenueIdHelp tooltipId="login-venue-id-help" />
+            </div>
             <VenueIdCombobox
               disabled={isBusy}
               inputId="login-venue-id"

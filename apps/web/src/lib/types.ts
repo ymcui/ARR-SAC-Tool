@@ -40,6 +40,7 @@ export type PaperRecord = {
   preprint: boolean;
   hasConfidential: boolean;
   issueReport: boolean;
+  recommendationPosted?: boolean;
   reviewerConfidence: ScoreSummary;
   soundnessScore: ScoreSummary;
   excitementScore: ScoreSummary;

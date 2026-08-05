@@ -1,6 +1,6 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
-openreview-py>=1.45
+openreview-py>=2.3.1,<2.4
 pytest>=8.0,<9.0
 httpx>=0.27,<1.0
 packaging>=24,<27

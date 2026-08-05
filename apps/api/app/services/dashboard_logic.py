@@ -240,6 +240,7 @@ def _is_desk_rejected(submission: Dict[str, Any]) -> bool:
 
 def _build_paper_record(submission: Dict[str, Any], area_chair: str) -> PaperRecord:
     replies = submission.get("replies", []) or []
+    commitment_replies = submission.get("commitment_replies", []) or []
 
     completed_reviews = 0
     confidence_scores: List[float] = []
@@ -323,6 +324,7 @@ def _build_paper_record(submission: Dict[str, Any], area_chair: str) -> PaperRec
         ),
         hasConfidential=has_confidential,
         issueReport=has_issue_report,
+        recommendationPosted=any(_is_meta_review(reply) for reply in commitment_replies),
         reviewerConfidence=_score_summary(confidence_scores),
         soundnessScore=_score_summary(soundness_scores),
         excitementScore=_score_summary(excitement_scores),

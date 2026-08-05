@@ -37,12 +37,28 @@ If you do not already have Node.js and `npm`, install Node.js from [nodejs.org](
 
 ## Installation
 
-Just run:
+1. Clone this repository to your local machine:
+
 ```bash
+git clone https://github.com/ymcui/ARR-SAC-Tool.git
+```
+
+2. Go into the cloned directory:
+```bash
+cd ARR-SAC-Tool
 npm install
 ```
 
 You only need to run `npm install` once after downloading the repository, or again later if the project dependencies change (not often).
+
+3. (Optional) How to update the dashboard to the latest version?
+
+Stop the dashboard with `Ctrl+C`, then run from the project directory:
+
+```bash
+git pull
+npm install
+```
 
 ## Start The Dashboard
 
@@ -74,6 +90,8 @@ The venue textbox remembers recently loaded valid venue IDs, so you do not need 
 ## Usage for ARR Stage
 
 As indicated above, Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser first, then sign in with your OpenReview email and password. Enter your venue ID and click **Load venue**. The dashboard will load the venue data and display it in the corresponding section.
+
+The venue ID is the part of the OpenReview URL after `https://openreview.net/group?id=`. For example, for the ARR March 2026 venue, the URL is: `https://openreview.net/group?id=aclweb.org/ACL/ARR/2026/March`, so the venue ID is `aclweb.org/ACL/ARR/2026/March`.
 
 <p align="center">
     <br>

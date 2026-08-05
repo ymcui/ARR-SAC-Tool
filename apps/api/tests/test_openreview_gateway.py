@@ -18,10 +18,11 @@ from app.services.openreview_gateway import (
 
 
 class LoginResponse:
-    def __init__(self, status_code: int, payload: dict) -> None:
+    def __init__(self, status_code: int, payload: dict, headers: dict | None = None) -> None:
         self.status_code = status_code
         self.ok = 200 <= status_code < 300
         self.payload = payload
+        self.headers = headers or {}
 
     def json(self):
         return self.payload
@@ -135,6 +136,62 @@ def test_configured_client_returns_rate_limits_without_retrying_retry_after() ->
     session.close()
 
 
+def test_configured_client_logs_sanitized_quota_headers(caplog) -> None:
+    response = LoginResponse(
+        200,
+        {},
+        headers={
+            "RateLimit-Limit": "144",
+            "RateLimit-Remaining": "103",
+            "RateLimit-Reset": "2714",
+            "RateLimit-Policy": "144;w=3600",
+        },
+    )
+    client = login_client(response)
+    client.token = "active-token"
+    openreview_gateway._configure_client_timeouts(client)
+
+    with caplog.at_level("WARNING"):
+        client.session.request(
+            "GET",
+            "https://api2.openreview.net/notes",
+            params={"ids": ["private-paper-a", "private-paper-b"], "details": "replies"},
+        )
+
+    assert "GET /notes query=ids=2,details=replies" in caplog.text
+    assert "limit=144 remaining=103 reset=2714 policy=144;w=3600" in caplog.text
+    assert "private-paper-a" not in caplog.text
+    assert "active-token" not in caplog.text
+
+
+def test_quota_metadata_uses_rate_limit_error_details_without_logging_request_id(caplog) -> None:
+    response = LoginResponse(
+        429,
+        {
+            "details": {
+                "limit": 144,
+                "remaining": 0,
+                "resetTime": "2026-08-04T08:13:48.767Z",
+                "used": 165,
+                "current": 165,
+                "reqId": "private-request-id",
+            }
+        },
+    )
+    client = login_client(response)
+    client.token = "active-token"
+    openreview_gateway._configure_client_timeouts(client)
+
+    with caplog.at_level("WARNING"):
+        client.session.request("GET", "https://api2.openreview.net/groups", params={"id": "private-venue"})
+
+    assert "GET /groups query=id" in caplog.text
+    assert "limit=144 remaining=0" in caplog.text
+    assert "used=165 current=165" in caplog.text
+    assert "private-request-id" not in caplog.text
+    assert "private-venue" not in caplog.text
+
+
 def test_gateway_classifies_openreview_rate_limit_with_utc_reset_time() -> None:
     class RateLimitedClient:
         user = {"profile": {"id": "~SAC1", "fullname": "SAC One"}}
@@ -179,6 +236,7 @@ def _raw_note(note: SimpleNamespace) -> dict:
         "readers": list(getattr(note, "readers", []) or []),
         "signatures": list(getattr(note, "signatures", []) or []),
         "invitations": list(getattr(note, "invitations", []) or []),
+        "domain": getattr(note, "domain", None),
         "content": dict(getattr(note, "content", {}) or {}),
         "details": details,
         "tcdate": getattr(note, "tcdate", 0) or 0,
@@ -430,7 +488,6 @@ def test_gateway_bulk_fetches_assignment_groups_after_filtering_submissions() ->
             "number": [42, 77, 99],
             "limit": 3,
             "invitation": "aclweb.org/ACL/ARR/2026/March/-/Submission",
-            "details": "replies",
         }
     ]
     assert [submission["number"] for submission in snapshot["submissions"]] == [42, 77]
@@ -464,7 +521,7 @@ def test_gateway_bulk_fetches_assignment_groups_after_filtering_submissions() ->
     assert any(phase[0] == "groups" and phase[3] == 3 for phase in phases)
 
 
-def test_gateway_loads_sixty_arr_papers_in_seven_requests() -> None:
+def test_gateway_loads_sixty_arr_papers_with_bounded_forum_reply_streams() -> None:
     venue_id = "aclweb.org/ACL/ARR/2026/May"
     submission_invitation = f"{venue_id}/-/Submission"
 
@@ -477,6 +534,7 @@ def test_gateway_loads_sixty_arr_papers_in_seven_requests() -> None:
             self.request_count = 0
             self.batch_note_requests: list[dict] = []
             self.profile_batches: list[list[str]] = []
+            self.forum_note_requests: list[tuple[list[str], bool]] = []
 
         def request(self, method: str, url: str, **kwargs):
             raise AssertionError(f"Unexpected raw request: {method} {url}")
@@ -491,6 +549,7 @@ def test_gateway_loads_sixty_arr_papers_in_seven_requests() -> None:
                     SimpleNamespace(
                         number=int(number),
                         id=f"paper-{number}",
+                        domain=venue_id,
                         readers=[f"{venue_id}/Submission{number}/Senior_Area_Chairs"],
                         content={"venue": {"value": "ARR"}, "paper_type": {"value": "Long"}},
                         details={"replies": []},
@@ -533,6 +592,23 @@ def test_gateway_loads_sixty_arr_papers_in_seven_requests() -> None:
                 )
             ]
 
+        def get_notes(self, forum: list[str], stream: bool):
+            self.request_count += 1
+            self.forum_note_requests.append((forum, stream))
+            assert stream is True
+            return [
+                SimpleNamespace(
+                    id="review-1",
+                    forum="paper-1",
+                    replyto="paper-1",
+                    readers=["everyone"],
+                    signatures=["~Reviewer1"],
+                    invitations=[f"{venue_id}/Submission1/-/Official_Review"],
+                    content={"overall_assessment": {"value": "4 Strong accept"}},
+                    tcdate=1712188800000,
+                )
+            ]
+
         def get_grouped_edges(self, invitation: str, groupby: str, select: str):
             self.request_count += 1
             assert invitation == f"{venue_id}/-/Preferred_Emails"
@@ -559,11 +635,16 @@ def test_gateway_loads_sixty_arr_papers_in_seven_requests() -> None:
 
     snapshot = OpenReviewGateway().fetch_dashboard_snapshot(client, venue_id)
 
-    assert client.request_count == 7
+    assert client.request_count == 9
     assert [len(request["number"]) for request in client.batch_note_requests] == [50, 10]
-    assert all(request["details"] == "replies" for request in client.batch_note_requests)
+    assert all("details" not in request for request in client.batch_note_requests)
+    assert [len(request[0]) for request in client.forum_note_requests] == [50, 10]
+    assert client.forum_note_requests[0][0] == [f"paper-{number}" for number in range(1, 51)]
+    assert client.forum_note_requests[1][0] == [f"paper-{number}" for number in range(51, 61)]
+    assert all(request[1] is True for request in client.forum_note_requests)
     assert client.profile_batches == [["~Area_Chair1"]]
     assert len(snapshot["submissions"]) == 60
+    assert snapshot["submissions"][0]["replies"][0]["id"] == "review-1"
     assert snapshot["area_chair_contacts"]["~Area_Chair1"]["email"] == "area-chair@example.com"
 
 
@@ -804,8 +885,9 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
                 SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Authors"),
             ]
 
-        def get_all_notes(self, invitation: str):
+        def get_all_notes(self, invitation: str, details: str | None = None):
             assert invitation == "aclweb.org/ACL/2026/Conference/-/Commitment"
+            assert details is None
             self.note_requests.append(invitation)
             return [
                 SimpleNamespace(
@@ -818,6 +900,24 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
                     content={
                         "paper_link": {"value": "https://openreview.net/forum?id=arr-paper-42"},
                         "area_chair": {"value": "~Area_ChairCommitment"},
+                    },
+                    details={
+                        "replies": [
+                            SimpleNamespace(
+                                id="commitment-meta-review-1",
+                                forum="commitment-7",
+                                replyto="commitment-7",
+                                readers=["aclweb.org/ACL/2026/Conference/Area_Chairs"],
+                                signatures=[
+                                    "aclweb.org/ACL/2026/Conference/Commitment7/Area_Chair_1"
+                                ],
+                                invitations=[
+                                    "aclweb.org/ACL/2026/Conference/Commitment7/-/Meta_Review"
+                                ],
+                                content={"recommendation": {"value": "Accept"}},
+                                tcdate=1712188800000,
+                            )
+                        ]
                     },
                 )
             ]
@@ -859,7 +959,7 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
     assert client.note_requests == ["aclweb.org/ACL/2026/Conference/-/Commitment"]
     assert client.forum_requests == []
     assert client.batch_requests == [
-        {"ids": ["arr-paper-42"], "details": "replies", "limit": 1}
+        {"ids": ["arr-paper-42"], "limit": 1}
     ]
     assert (None, "aclweb.org/ACL/2026/Conference") in client.all_group_requests
     assert "aclweb.org/ACL/2026/Conference/Commitment42/Reviewers" not in client.group_requests
@@ -874,6 +974,7 @@ def test_gateway_loads_commitment_entries_from_linked_forums() -> None:
     assert submission["content"]["title"]["value"] == "Committed Work on Review Monitoring"
     assert submission["content"]["Previous URL"]["value"] == "https://openreview.net/forum?id=previous-arr-paper"
     assert submission["replies"][0]["id"] == "review-1"
+    assert submission["commitment_replies"][0]["id"] == "commitment-meta-review-1"
 
 
 def test_gateway_loads_forty_direct_commitments_without_venue_wide_assignment_queries() -> None:
@@ -888,6 +989,7 @@ def test_gateway_loads_forty_direct_commitments_without_venue_wide_assignment_qu
             self.user = {"profile": {"id": "~Test_SAC1", "fullname": "Test SAC"}}
             self.request_count = 0
             self.edge_requests: list[tuple[str, str | None]] = []
+            self.note_stream_requests: list[dict] = []
 
         def get(self, url: str, params: dict, headers: dict):
             self.request_count += 1
@@ -922,6 +1024,56 @@ def test_gateway_loads_forty_direct_commitments_without_venue_wide_assignment_qu
         def get_all_notes(self, *args, **kwargs):
             raise AssertionError("Direct SAC assignments must not load every commitment entry")
 
+        def get_notes(
+            self,
+            *,
+            stream: bool,
+            domain: str | None = None,
+            forum: list[str] | None = None,
+            parent_invitations: str | None = None,
+        ):
+            self.request_count += 1
+            self.note_stream_requests.append(
+                {
+                    "domain": domain,
+                    "forum": forum,
+                    "stream": stream,
+                    "parent_invitations": parent_invitations,
+                }
+            )
+            assert stream is True
+            if parent_invitations is not None:
+                assert domain == venue_id
+                assert forum is None
+                assert parent_invitations == f"{venue_id}/-/Meta_Review"
+                return [
+                    SimpleNamespace(
+                        id="commitment-meta-review-1",
+                        forum="commitment-1",
+                        replyto="commitment-1",
+                        readers=[f"{venue_id}/Area_Chairs"],
+                        signatures=[f"{venue_id}/Submission1/Area_Chair_1"],
+                        invitations=[f"{venue_id}/Submission1/-/Meta_Review"],
+                        content={"recommendation": {"value": "Accept"}},
+                        tcdate=1712188800000,
+                    )
+                ]
+
+            assert domain is None
+            assert forum == [f"arr-paper-{number}" for number in range(1, 41)]
+            return [
+                SimpleNamespace(
+                    id="review-1",
+                    forum="arr-paper-1",
+                    replyto="arr-paper-1",
+                    readers=["everyone"],
+                    signatures=["~Reviewer1"],
+                    invitations=["aclweb.org/ACL/ARR/2026/May/Submission1001/-/Official_Review"],
+                    content={"overall_assessment": {"value": "4 Strong accept"}},
+                    tcdate=1712188800000,
+                )
+            ]
+
         def _note_for_batch(self, note_id: str) -> SimpleNamespace:
             prefix, raw_number = note_id.rsplit("-", 1)
             number = int(raw_number)
@@ -939,6 +1091,7 @@ def test_gateway_loads_forty_direct_commitments_without_venue_wide_assignment_qu
             return SimpleNamespace(
                 number=1000 + number,
                 id=note_id,
+                domain="aclweb.org/ACL/ARR/2026/May",
                 readers=["everyone"],
                 content={
                     "venue": {"value": "ACL ARR 2026 May"},
@@ -952,18 +1105,36 @@ def test_gateway_loads_forty_direct_commitments_without_venue_wide_assignment_qu
     snapshot = OpenReviewGateway().fetch_dashboard_snapshot(client, venue_id)
     dashboard = build_dashboard_response(snapshot, venue_id)
 
-    assert client.request_count == 4
+    assert client.request_count == 6
     assert client.edge_requests == [
         (area_chair_assignment_id, "~Test_SAC1"),
     ]
     assert len(client.batch_requests) == 2
     assert len(client.batch_requests[0]["ids"]) == 40
+    assert "details" not in client.batch_requests[0]
     assert len(client.batch_requests[1]["ids"]) == 40
+    assert "details" not in client.batch_requests[1]
+    assert client.note_stream_requests == [
+        {
+            "domain": venue_id,
+            "forum": None,
+            "stream": True,
+            "parent_invitations": f"{venue_id}/-/Meta_Review",
+        },
+        {
+            "domain": None,
+            "forum": [f"arr-paper-{number}" for number in range(1, 41)],
+            "stream": True,
+            "parent_invitations": None,
+        },
+    ]
     assert len(snapshot["submissions"]) == 40
     assert len(dashboard.papers) == 40
     assert snapshot["submissions"][0]["area_chairs"] == ["~Test_SAC1"]
     assert snapshot["submissions"][0]["reviewers"] == []
     assert dashboard.papers[0].expectedReviews == 0
+    assert dashboard.papers[0].recommendationPosted is True
+    assert dashboard.papers[1].recommendationPosted is False
     assert snapshot["my_sac_groups"] == [f"{venue_id}/Area_Chairs", "~Test_SAC1"]
 
 
@@ -1077,8 +1248,9 @@ def test_gateway_continues_commitment_area_chair_lookup_after_empty_bulk_group()
             assert members == "~Test_SAC1"
             return [SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Area_Chairs")]
 
-        def get_all_notes(self, invitation: str):
+        def get_all_notes(self, invitation: str, details: str | None = None):
             assert invitation == "aclweb.org/ACL/2026/Conference/-/Commitment"
+            assert details is None
             return [
                 SimpleNamespace(
                     number=7,
@@ -1168,8 +1340,9 @@ def test_gateway_skips_out_of_scope_commitment_entries_before_loading_forum() ->
                 SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Commitment7/Senior_Area_Chairs"),
             ]
 
-        def get_all_notes(self, invitation: str):
+        def get_all_notes(self, invitation: str, details: str | None = None):
             assert invitation == "aclweb.org/ACL/2026/Conference/-/Commitment"
+            assert details is None
             return [
                 SimpleNamespace(
                     number=7,
@@ -1203,7 +1376,7 @@ def test_gateway_skips_out_of_scope_commitment_entries_before_loading_forum() ->
     snapshot = OpenReviewGateway().fetch_dashboard_snapshot(client, "aclweb.org/ACL/2026/Conference")
 
     assert client.batch_requests == [
-        {"ids": ["arr-paper-42"], "limit": 1, "details": "replies"}
+        {"ids": ["arr-paper-42"], "limit": 1}
     ]
     assert [submission["id"] for submission in snapshot["submissions"]] == ["arr-paper-42"]
     assert snapshot["submissions"][0]["forum_url"] == "https://openreview.net/forum?id=commitment-7"
@@ -1244,8 +1417,9 @@ def test_gateway_uses_venue_level_area_chair_membership_for_commitment_stage() -
                 SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Area_Chairs"),
             ]
 
-        def get_all_notes(self, invitation: str):
+        def get_all_notes(self, invitation: str, details: str | None = None):
             assert invitation == "aclweb.org/ACL/2026/Conference/-/Commitment"
+            assert details is None
             return [
                 SimpleNamespace(
                     number=7,
@@ -1269,7 +1443,7 @@ def test_gateway_uses_venue_level_area_chair_membership_for_commitment_stage() -
     snapshot = OpenReviewGateway().fetch_dashboard_snapshot(client, "aclweb.org/ACL/2026/Conference")
 
     assert client.batch_requests == [
-        {"ids": ["arr-paper-42"], "limit": 1, "details": "replies"}
+        {"ids": ["arr-paper-42"], "limit": 1}
     ]
     assert snapshot["my_sac_groups"] == ["aclweb.org/ACL/2026/Conference/Area_Chairs"]
     assert [submission["id"] for submission in snapshot["submissions"]] == ["arr-paper-42"]
@@ -1298,8 +1472,9 @@ def test_gateway_skips_commitment_entries_visible_through_authors_group() -> Non
                 SimpleNamespace(id="aclweb.org/ACL/2026/Conference/Commitment8/Authors"),
             ]
 
-        def get_all_notes(self, invitation: str):
+        def get_all_notes(self, invitation: str, details: str | None = None):
             assert invitation == "aclweb.org/ACL/2026/Conference/-/Commitment"
+            assert details is None
             return [
                 SimpleNamespace(
                     number=8,
@@ -1332,7 +1507,8 @@ def test_gateway_fails_closed_when_scoped_commitment_entry_has_invalid_link() ->
             assert members == "~Test_SAC1"
             return [SimpleNamespace(id=f"{prefix}/Area_Chairs")]
 
-        def get_all_notes(self, invitation: str):
+        def get_all_notes(self, invitation: str, details: str | None = None):
+            assert details is None
             return [
                 SimpleNamespace(
                     number=7,

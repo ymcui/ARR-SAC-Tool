@@ -50,6 +50,7 @@ class PaperRecord(BaseModel):
     preprint: bool = False
     hasConfidential: bool = False
     issueReport: bool = False
+    recommendationPosted: bool = False
     reviewerConfidence: ScoreSummary = Field(default_factory=ScoreSummary)
     soundnessScore: ScoreSummary = Field(default_factory=ScoreSummary)
     excitementScore: ScoreSummary = Field(default_factory=ScoreSummary)

@@ -43,6 +43,17 @@ describe("LoginPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("explains how to derive the venue ID from an OpenReview group URL", () => {
+    render(createElement(LoginHarness, {}));
+
+    const helpButton = screen.getByRole("button", { name: "How to find the venue ID" });
+    const tooltip = screen.getByRole("tooltip");
+
+    expect(helpButton).toHaveAttribute("aria-describedby", tooltip.id);
+    expect(tooltip).toHaveTextContent("https://openreview.net/group?id=");
+    expect(tooltip).toHaveTextContent("aclweb.org/ACL/ARR/2026/March");
+  });
+
   it("submits the credentials and controlled venue in one action", async () => {
     const onLogin = vi.fn(async () => undefined);
     render(createElement(LoginHarness, { onLogin }));

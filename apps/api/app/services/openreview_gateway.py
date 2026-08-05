@@ -110,6 +110,94 @@ def _rate_limit_message(exc: BaseException) -> str:
     return "OpenReview rate limit reached. Wait for its request window to reset, then try Load / Refresh again."
 
 
+def _request_quota_summary(method: str, url: str, kwargs: Dict[str, Any]) -> str:
+    path = urlparse(url).path or "/"
+    params = kwargs.get("params")
+    query_parts: List[str] = []
+    if isinstance(params, dict):
+        for key in ("ids", "number", "forum"):
+            value = params.get(key)
+            if isinstance(value, (list, tuple, set)):
+                query_parts.append(f"{key}={len(value)}")
+            elif value is not None:
+                query_parts.append(f"{key}=1")
+
+        details = params.get("details")
+        if details:
+            query_parts.append(f"details={details}")
+
+        for key in (
+            "id",
+            "invitation",
+            "parentInvitations",
+            "tail",
+            "members",
+            "prefix",
+            "domain",
+            "stream",
+        ):
+            if params.get(key) is not None:
+                query_parts.append(key)
+
+    query_summary = f" query={','.join(query_parts)}" if query_parts else ""
+    return f"{method.upper()} {path}{query_summary}"
+
+
+def _response_quota_metadata(response: Any) -> Dict[str, str]:
+    headers = getattr(response, "headers", {}) or {}
+    normalized_headers = {str(key).lower(): value for key, value in headers.items()}
+
+    def header(*names: str) -> str:
+        for name in names:
+            value = normalized_headers.get(name.lower())
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    metadata = {
+        "limit": header("ratelimit-limit", "x-ratelimit-limit"),
+        "remaining": header("ratelimit-remaining", "x-ratelimit-remaining"),
+        "reset": header("ratelimit-reset"),
+        "reset_at": header("x-ratelimit-reset"),
+        "policy": header("ratelimit-policy"),
+        "retry_after": header("retry-after"),
+    }
+
+    if getattr(response, "status_code", None) == 429:
+        response_json = getattr(response, "json", None)
+        if callable(response_json):
+            try:
+                payload = response_json()
+            except (requests.RequestException, ValueError):
+                payload = None
+            details = payload.get("details") if isinstance(payload, dict) else None
+            if isinstance(details, dict):
+                for output_key, detail_key in (
+                    ("limit", "limit"),
+                    ("remaining", "remaining"),
+                    ("reset_at", "resetTime"),
+                    ("used", "used"),
+                    ("current", "current"),
+                ):
+                    if not metadata.get(output_key) and details.get(detail_key) is not None:
+                        metadata[output_key] = str(details[detail_key])
+
+    return {key: value for key, value in metadata.items() if value}
+
+
+def _log_response_quota(method: str, url: str, kwargs: Dict[str, Any], response: Any) -> None:
+    metadata = _response_quota_metadata(response)
+    if not metadata:
+        return
+
+    logger.warning(
+        "OpenReview quota response: %s status=%s %s",
+        _request_quota_summary(method, url, kwargs),
+        getattr(response, "status_code", "unknown"),
+        " ".join(f"{key}={value}" for key, value in metadata.items()),
+    )
+
+
 def _raise_if_authentication_error(exc: BaseException) -> None:
     if isinstance(exc, (DashboardAuthenticationError, DashboardRateLimitError)):
         raise exc
@@ -149,6 +237,7 @@ def _configure_client_timeouts(client: Any) -> None:
             (OPENREVIEW_CONNECT_TIMEOUT_SECONDS, OPENREVIEW_READ_TIMEOUT_SECONDS),
         )
         response = original_request(method, url, **kwargs)
+        _log_response_quota(method, url, kwargs, response)
         is_authenticated_api_request = bool(getattr(client, "token", None)) and url != getattr(
             client,
             "login_url",
@@ -300,17 +389,129 @@ def _load_notes_by_numbers_with_replies(
     invitation: str,
     note_numbers: Iterable[int],
 ) -> List[Any]:
-    return _load_notes_in_batches(
+    submissions = _load_notes_in_batches(
         client,
         filter_name="number",
         values=note_numbers,
         invitation=invitation,
-        details="replies",
     )
+    _attach_visible_forum_replies(client, submissions)
+    return submissions
 
 
 def _load_notes_by_ids_with_replies(client: Any, note_ids: Iterable[str]) -> Dict[str, Any]:
-    return _load_notes_by_ids(client, note_ids, details="replies")
+    notes_by_id = _load_notes_by_ids(client, note_ids)
+    _attach_visible_forum_replies(client, notes_by_id.values())
+
+    return notes_by_id
+
+
+def _attach_replies(notes: Iterable[Any], candidate_replies: Iterable[Any]) -> None:
+    notes_by_id = {
+        str(getattr(note, "id", "") or ""): note
+        for note in notes
+        if str(getattr(note, "id", "") or "")
+    }
+    replies_by_forum: Dict[str, List[Any]] = {note_id: [] for note_id in notes_by_id}
+    seen_reply_ids_by_forum: Dict[str, set[str]] = {note_id: set() for note_id in notes_by_id}
+
+    for note_id, note in notes_by_id.items():
+        existing_replies = ((getattr(note, "details", {}) or {}).get("replies", []) or [])
+        for reply in existing_replies:
+            reply_id = str(
+                (reply.get("id", "") if isinstance(reply, dict) else getattr(reply, "id", "")) or ""
+            )
+            if reply_id and reply_id not in seen_reply_ids_by_forum[note_id]:
+                seen_reply_ids_by_forum[note_id].add(reply_id)
+                replies_by_forum[note_id].append(reply)
+
+    for reply in candidate_replies:
+        reply_id = str(
+            (reply.get("id", "") if isinstance(reply, dict) else getattr(reply, "id", "")) or ""
+        )
+        forum_id = str(
+            (reply.get("forum", "") if isinstance(reply, dict) else getattr(reply, "forum", "")) or ""
+        )
+        if forum_id not in notes_by_id or reply_id == forum_id:
+            continue
+        if reply_id and reply_id in seen_reply_ids_by_forum[forum_id]:
+            continue
+        if reply_id:
+            seen_reply_ids_by_forum[forum_id].add(reply_id)
+        replies_by_forum[forum_id].append(reply)
+
+    for note_id, note in notes_by_id.items():
+        details = dict(getattr(note, "details", {}) or {})
+        details["replies"] = replies_by_forum[note_id]
+        note.details = details
+
+
+def _attach_visible_forum_replies(client: Any, notes: Iterable[Any]) -> None:
+    notes = list(notes)
+    if not notes:
+        return
+
+    get_notes = getattr(client, "get_notes", None)
+    if not callable(get_notes):
+        # Lightweight test doubles and older compatibility clients may already
+        # include replies in the root Note details.
+        _attach_replies(notes, [])
+        return
+
+    # API v2 accepts a list for the forum filter. Querying only the assigned
+    # forums avoids both an expensive venue-wide scan and the server-side
+    # `details=replies` expansion that consumes quota per linked reply.
+    for offset in range(0, len(notes), OPENREVIEW_NOTE_BATCH_SIZE):
+        note_batch = notes[offset : offset + OPENREVIEW_NOTE_BATCH_SIZE]
+        forum_ids = [
+            str(getattr(note, "id", "") or "")
+            for note in note_batch
+            if str(getattr(note, "id", "") or "")
+        ]
+        if not forum_ids:
+            _attach_replies(note_batch, [])
+            continue
+
+        try:
+            visible_notes = get_notes(forum=forum_ids, stream=True)
+        except Exception as exc:
+            logger.warning(
+                "OpenReview forum reply batch failed: forums=%s error_type=%s status=%s",
+                len(forum_ids),
+                type(exc).__name__,
+                _exception_status(exc),
+            )
+            raise
+        _attach_replies(note_batch, visible_notes)
+
+
+def _load_replies_by_parent_invitation(
+    client: Any,
+    *,
+    parent_invitation: str,
+    domain: str,
+    forum_ids: Iterable[str],
+) -> Dict[str, List[Any]]:
+    target_forum_ids = {str(forum_id) for forum_id in forum_ids if str(forum_id)}
+    if not target_forum_ids:
+        return {}
+
+    get_notes = getattr(client, "get_notes", None)
+    if not callable(get_notes):
+        return {}
+
+    replies_by_forum: Dict[str, List[Any]] = {forum_id: [] for forum_id in target_forum_ids}
+    replies = get_notes(
+        parent_invitations=parent_invitation,
+        domain=domain,
+        stream=True,
+    )
+    for reply in replies:
+        forum_id = str(getattr(reply, "forum", "") or "")
+        if forum_id in replies_by_forum:
+            replies_by_forum[forum_id].append(reply)
+
+    return replies_by_forum
 
 
 def _group_members(group: Any) -> List[str]:
@@ -807,13 +1008,17 @@ class OpenReviewGateway:
             logger.warning(
                 (
                     "Dashboard load phase assigned_submission_batches completed in %.2fs for %s: "
-                    "assignments=%s submissions=%s requests_at_most=%s"
+                    "assignments=%s submissions=%s replies=%s requests_at_most=%s"
                 ),
                 time.perf_counter() - phase_started_at,
                 viewer_id,
                 len(assigned_numbers),
                 len(submissions),
-                (len(assigned_numbers) + OPENREVIEW_NOTE_BATCH_SIZE - 1) // OPENREVIEW_NOTE_BATCH_SIZE,
+                sum(
+                    len(((getattr(submission, "details", {}) or {}).get("replies", []) or []))
+                    for submission in submissions
+                ),
+                ((len(assigned_numbers) + OPENREVIEW_NOTE_BATCH_SIZE - 1) // OPENREVIEW_NOTE_BATCH_SIZE) + 1,
             )
 
         submissions.sort(key=lambda submission: int(getattr(submission, "number", 0) or 0))
@@ -1159,7 +1364,10 @@ class OpenReviewGateway:
                         )
                     break
 
-                commitment_notes_by_id = _load_notes_by_ids(client, assigned_commitment_note_ids)
+                commitment_notes_by_id = _load_notes_by_ids(
+                    client,
+                    assigned_commitment_note_ids,
+                )
                 missing_note_ids = assigned_commitment_note_ids - set(commitment_notes_by_id)
                 if missing_note_ids:
                     raise DashboardFetchError(
@@ -1194,7 +1402,9 @@ class OpenReviewGateway:
                 if progress_callback:
                     progress_callback("submissions", "Fetching commitment paper entries...", 0, 0)
                 phase_started_at = time.perf_counter()
-                commitment_notes = client.get_all_notes(invitation=paper_entry_invitation)
+                commitment_notes = client.get_all_notes(
+                    invitation=paper_entry_invitation,
+                )
                 logger.warning(
                     "Dashboard load phase commitment_entries completed in %.2fs for %s: entries=%s",
                     time.perf_counter() - phase_started_at,
@@ -1298,6 +1508,36 @@ class OpenReviewGateway:
                 }
             )
 
+        meta_review_name = _content_value(venue_content.get("meta_review_name"), "Meta_Review").strip()
+        commitment_replies_by_forum: Dict[str, List[Any]] = {}
+        if commitment_candidates and meta_review_name:
+            try:
+                phase_started_at = time.perf_counter()
+                commitment_replies_by_forum = _load_replies_by_parent_invitation(
+                    client,
+                    parent_invitation=f"{venue_id}/-/{meta_review_name}",
+                    domain=venue_id,
+                    forum_ids=(
+                        str(getattr(candidate["batch_note"], "id", "") or "")
+                        for candidate in commitment_candidates
+                    ),
+                )
+                logger.warning(
+                    (
+                        "Dashboard load phase commitment_recommendations completed in %.2fs for %s: "
+                        "forums=%s replies=%s"
+                    ),
+                    time.perf_counter() - phase_started_at,
+                    viewer_id,
+                    len(commitment_replies_by_forum),
+                    sum(len(replies) for replies in commitment_replies_by_forum.values()),
+                )
+            except Exception as exc:
+                _raise_if_authentication_error(exc)
+                raise DashboardFetchError(
+                    f"Could not load commitment recommendations for venue '{venue_id}'."
+                ) from exc
+
         area_chairs_by_note_id: Dict[str, List[str]] | None = direct_area_chairs_by_note_id
         commitment_groups_by_id: Dict[str, Any] = {}
         if commitment_candidates:
@@ -1355,11 +1595,18 @@ class OpenReviewGateway:
                     (str(candidate["forum_id"]) for candidate in commitment_candidates),
                 )
                 logger.warning(
-                    "Dashboard load phase commitment_forum_batches completed in %.2fs for %s: requested=%s loaded=%s",
+                    (
+                        "Dashboard load phase commitment_forum_batches completed in %.2fs for %s: "
+                        "requested=%s loaded=%s replies=%s"
+                    ),
                     time.perf_counter() - phase_started_at,
                     viewer_id,
                     len(commitment_candidates),
                     len(prefetched_forum_notes),
+                    sum(
+                        len(((getattr(note, "details", {}) or {}).get("replies", []) or []))
+                        for note in prefetched_forum_notes.values()
+                    ),
                 )
             except Exception as exc:
                 _raise_if_authentication_error(exc)
@@ -1413,6 +1660,13 @@ class OpenReviewGateway:
                 effective_readers.add(viewer_id)
 
             replies = ((getattr(forum_note, "details", {}) or {}).get("replies", []) or [])
+            embedded_commitment_replies = (
+                (getattr(batch_note, "details", {}) or {}).get("replies", []) or []
+            )
+            commitment_replies = commitment_replies_by_forum.get(
+                str(getattr(batch_note, "id", "") or ""),
+                embedded_commitment_replies,
+            )
             area_chair = self._commitment_area_chair(
                 batch_note=batch_note,
                 forum_note=forum_note,
@@ -1438,6 +1692,9 @@ class OpenReviewGateway:
                     "readers": sorted(effective_readers),
                     "content": forum_content,
                     "replies": [_note_to_dict(reply) for reply in replies],
+                    "commitment_replies": [
+                        _note_to_dict(reply) for reply in commitment_replies
+                    ],
                     "area_chairs": [area_chair or "Unassigned"],
                     "reviewers": reviewers,
                 },

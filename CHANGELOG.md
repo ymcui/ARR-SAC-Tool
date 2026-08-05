@@ -2,6 +2,26 @@
 
 All notable user-facing changes are documented here.
 
+## [2.10.0] - 2026-08-05
+
+### Added
+
+- Added a commitment-stage Recommendation column and filtered `posted/total` counter based on submitted meta-reviews.
+- Added recent Venue ID suggestions to the login form and accessible Venue ID help tooltips to both venue selectors.
+
+### Changed
+
+- Defaulted commitment-stage assignment discovery to the OpenReview Area Chairs role, with Senior Area Chairs retained as a fallback.
+- Reworked assigned-paper, reply, assignment, group, and profile retrieval into bounded bulk requests and exact multi-forum streams to reduce OpenReview quota usage.
+- Centered status and score columns while emphasizing only the Meta and Overall body-cell values.
+- Updated the supported `openreview-py` range to 2.3.1 through the 2.3 release line.
+
+### Fixed
+
+- Reported OpenReview rate limits immediately with reset guidance instead of retrying 429 responses or starting browser recovery loads.
+- Prevented recent-venue dropdowns and Venue ID help overlays from stretching the login or account panels.
+- Restored commitment-stage paper loading for SACs represented as Area Chairs in the conference venue.
+
 ## [2.9.0] - 2026-07-28
 
 ### Added

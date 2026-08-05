@@ -3,6 +3,7 @@
 import { FocusEvent, FormEvent, useEffect, useRef, useState } from "react";
 
 import { VenueIdCombobox } from "@/components/venue-id-combobox";
+import { VenueIdHelp } from "@/components/venue-id-help";
 import type { ViewerInfo } from "@/lib/types";
 
 type AccountMenuProps = {
@@ -133,9 +134,12 @@ export function AccountMenu({
         >
           <form className="account-menu-form" onSubmit={handleSubmit}>
             <div className="field">
-              <label htmlFor={VENUE_INPUT_ID}>
-                <span>Venue ID</span>
-              </label>
+              <div className="field-label-row">
+                <label htmlFor={VENUE_INPUT_ID}>
+                  <span>Venue ID</span>
+                </label>
+                <VenueIdHelp tooltipId="account-venue-id-help" />
+              </div>
               <VenueIdCombobox
                 disabled={isBusy}
                 inputId={VENUE_INPUT_ID}

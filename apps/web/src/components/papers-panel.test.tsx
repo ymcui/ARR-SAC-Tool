@@ -22,6 +22,7 @@ const papersFixture: PaperRecord[] = [
     preprint: false,
     hasConfidential: true,
     issueReport: false,
+    recommendationPosted: true,
     reviewerConfidence: { average: 4, values: [4, 4, 4] },
     soundnessScore: { average: 3.5, values: [3, 4, 3.5] },
     excitementScore: { average: 3.5, values: [3, 4, 3.5] },
@@ -47,6 +48,7 @@ const papersFixture: PaperRecord[] = [
     preprint: true,
     hasConfidential: false,
     issueReport: true,
+    recommendationPosted: true,
     reviewerConfidence: { average: 3, values: [3, 3] },
     soundnessScore: { average: 3, values: [3, 3] },
     excitementScore: { average: 2.5, values: [2.5, 2.5] },
@@ -71,6 +73,7 @@ const papersFixture: PaperRecord[] = [
     preprint: false,
     hasConfidential: false,
     issueReport: false,
+    recommendationPosted: false,
     reviewerConfidence: { average: 2, values: [2] },
     soundnessScore: { average: 2, values: [2] },
     excitementScore: { average: 2, values: [2] },
@@ -245,6 +248,7 @@ describe("PapersPanel", () => {
     expect(within(table).getAllByRole("img", { name: "Ready: No" })).toHaveLength(2);
     expect(within(table).getAllByRole("img", { name: "Responses: No" })).toHaveLength(2);
     expect(within(table).getByRole("img", { name: "Meta-review: No" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /recommendation/i })).not.toBeInTheDocument();
     expect(within(table).queryByText("YES")).not.toBeInTheDocument();
     expect(within(table).queryByText("NO")).not.toBeInTheDocument();
   });
@@ -282,9 +286,53 @@ describe("PapersPanel", () => {
       "Soundness",
       "Excitement",
       "Confidence",
+      "Recommendation",
     ]);
+    expect(screen.getAllByRole("img", { name: "Recommendation: Yes" })).toHaveLength(2);
+    expect(screen.getByRole("img", { name: "Recommendation: No" })).toBeInTheDocument();
     expect(screen.getAllByText("4.0").length).toBeGreaterThan(0);
     expect(screen.queryByText("4.0 (4.0 / 4.0 / 4.0)")).not.toBeInTheDocument();
+  });
+
+  it("centers status and score columns while emphasizing Meta and Overall", () => {
+    const { container } = renderPapersPanel([], "Commitment Stage");
+    const centeredColumns = [
+      "resubmission",
+      "preprint",
+      "hasConfidential",
+      "issueReport",
+      "metaReviewScore",
+      "overallAssessment",
+      "soundnessScore",
+      "excitementScore",
+      "reviewerConfidence",
+      "recommendationPosted"
+    ];
+
+    for (const column of centeredColumns) {
+      expect(container.querySelector(`th[data-column="${column}"]`)).toHaveClass(
+        "papers-table-column-center"
+      );
+      expect(container.querySelector(`td[data-column="${column}"]`)).toHaveClass(
+        "papers-table-column-center"
+      );
+    }
+
+    for (const column of ["metaReviewScore", "overallAssessment"]) {
+      expect(container.querySelector(`th[data-column="${column}"]`)).not.toHaveClass(
+        "papers-table-column-priority"
+      );
+      expect(container.querySelector(`td[data-column="${column}"]`)).toHaveClass(
+        "papers-table-column-priority"
+      );
+    }
+
+    expect(container.querySelector('th[data-column="paperNumber"]')).toHaveClass(
+      "papers-table-column-text"
+    );
+    expect(container.querySelector('th[data-column="paperType"]')).toHaveClass(
+      "papers-table-column-text"
+    );
   });
 
   it("reveals paper details when clicking any table row cell", async () => {
@@ -324,6 +372,13 @@ describe("PapersPanel", () => {
     expect(screen.queryByText("Export Papers")).not.toBeInTheDocument();
     expect(screen.queryByText("Ready for rebuttal")).not.toBeInTheDocument();
     expect(screen.queryByText("Missing reviews")).not.toBeInTheDocument();
+    const summary = screen.getByLabelText("Recommendation summary");
+    expect(within(summary).getByText("Recommendation")).toBeInTheDocument();
+    expect(within(summary).getByText("2/3")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/search papers/i), "107");
+
+    expect(within(summary).getByText("0/1")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /export xlsx/i }));
 
     expect(onExport).toHaveBeenCalledTimes(1);

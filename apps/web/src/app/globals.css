@@ -973,6 +973,84 @@ select {
   opacity: 0.6;
 }
 
+.field-label-row {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.venue-id-help-button {
+  display: inline-flex;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(49, 95, 214, 0.3);
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--accent-strong);
+  cursor: help;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.venue-id-help-button:hover,
+.venue-id-help-button:focus {
+  border-color: rgba(49, 95, 214, 0.58);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(49, 95, 214, 0.1);
+  outline: none;
+}
+
+.field .venue-id-help-tooltip {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.48rem);
+  left: 0;
+  width: min(32rem, 100%);
+  visibility: hidden;
+  opacity: 0;
+  border: 1px solid rgba(49, 95, 214, 0.18);
+  border-radius: 0.85rem;
+  padding: 0.75rem 0.82rem;
+  background: rgba(13, 31, 69, 0.97);
+  box-shadow: 0 16px 36px rgba(13, 31, 69, 0.22);
+  color: #f6f8ff;
+  font-size: 0.76rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  text-transform: none;
+  transform: translateY(-0.2rem);
+  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+}
+
+.venue-id-help-tooltip code {
+  color: #d9e5ff;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.72rem;
+}
+
+.venue-id-help-button:hover + .venue-id-help-tooltip,
+.venue-id-help-button:focus + .venue-id-help-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.account-menu-popover .field .venue-id-help-tooltip {
+  font-size: 0.72rem;
+}
+
 .summary-item {
   position: relative;
   overflow: hidden;
@@ -1418,6 +1496,29 @@ select {
 .papers-panel .data-table td {
   padding-top: 0.82rem;
   padding-bottom: 0.82rem;
+}
+
+.papers-panel .data-table .papers-table-column-center {
+  text-align: center;
+}
+
+.papers-panel .data-table th.papers-table-column-center .table-head-button {
+  position: relative;
+  width: 100%;
+  justify-content: center;
+  padding-right: 1rem;
+  padding-left: 1rem;
+}
+
+.papers-panel .data-table th.papers-table-column-center .sort-indicator {
+  position: absolute;
+  right: 0;
+}
+
+.papers-panel .data-table td.papers-table-column-priority {
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .withdrawn-papers-panel .section-header {
