@@ -131,6 +131,7 @@ function spawnCommand({ name, command, args, env = process.env }) {
   const child = spawn(command, args, {
     cwd: root,
     env,
+    shell: process.platform === 'win32',
     stdio: ["inherit", "pipe", "pipe"],
     detached: process.platform !== "win32"
   });
